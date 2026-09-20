@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "questbook",
+  "version": "${version}",
+  "name": "Quest Book",
+  "description": "Admins create quests and assign tasks to players. Progress tracks automatically.",
+  "authors": [],
+  "contact": {},
+  "license": "MIT",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "com.questbook.QuestBook"
+    ],
+    "client": [
+      "com.questbook.client.QuestBookClient"
+    ]
+  },
+  "mixins": [
+    "questbook.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.19.5",
+    "minecraft": "~26.2",
+    "java": ">=25",
+    "fabric-api": "*"
+  }
+}
