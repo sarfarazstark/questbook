@@ -3,6 +3,7 @@ package com.questbook.client;
 import com.mojang.blaze3d.platform.InputConstants;
 import com.questbook.QuestBook;
 import com.questbook.client.gui.AdminQuestScreen;
+import com.questbook.client.gui.QuestBookScreen;
 
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
@@ -48,6 +49,13 @@ public final class EditorDebugDriver {
 	private static int pendingFrames = -1;
 	/** The screen this driver opened. Minecraft#screen is not public in 26.2. */
 	private static AdminQuestScreen current;
+
+	// --- player book capture state ---
+	/** Which capture run is in flight: the editor, or the player book. */
+	private static boolean bookRun = false;
+	private static int bookMode = -1;
+	private static int bookStepIndex = 0;
+	private static QuestBookScreen currentBook;
 
 	/**
 	 * Self-driving run: ticks down so the whole capture sequence happens with no
@@ -100,11 +108,20 @@ public final class EditorDebugDriver {
 
 		// Count down to the auto run, then hand over to it.
 		if (startupDelay > 0 && --startupDelay == 0) {
-			autoMode = 0;
+			// The player book is the screen with the reported layout bugs, so it is
+			// the default capture target. Set -Dquestbook.capture=editor for the other.
+			bookRun = !"editor".equals(System.getProperty("questbook.capture"));
+			bookMode = 0;
+			autoMode = bookRun ? -1 : 0;
 			return;
 		}
 
 		// Self-driving capture: no input needed, starts a few seconds after login.
+		if (bookRun && bookMode >= 0) {
+			bookStep(client);
+			return;
+		}
+
 		if (autoMode >= 0) {
 			autoStep(client);
 			return;
@@ -212,6 +229,98 @@ public final class EditorDebugDriver {
 			default -> current.debugAdvanceFocus();
 		}
 	}
+
+	// --- player book capture -------------------------------------------------
+
+	/**
+	 * Opens the player book instead of the admin editor, and photographs its states.
+	 *
+	 * <p>Separate run because the two are different screens: the book is what a
+	 * player reads, and its layout bugs — long names colliding with the progress
+	 * column, tooltips covering the list — do not show up in the editor at all.
+	 */
+	private static void bookStep(Minecraft client) {
+		if (bookMode == 0) {
+			clearPreviousShots(client);
+			QuestBook.LOGGER.info("Book capture: state {} ({} quests)",
+					bookStepIndex, ClientQuestState.quests().size());
+			currentBook = new QuestBookScreen();
+			client.setScreenAndShow(currentBook);
+			applyBookHover();
+			bookMode = AUTO_SETTLE;
+			return;
+		}
+
+		if (--bookMode > 0) {
+			return;
+		}
+
+		bookShoot(client);
+
+		if (bookStepIndex >= BOOK_LAST) {
+			QuestBook.LOGGER.info("Book capture finished after state {}", bookStepIndex);
+			bookMode = -1;
+			return;
+		}
+
+		bookStepIndex++;
+		bookMode = 0;
+	}
+
+	/**
+	 * Parks the pointer for this step.
+	 *
+	 * <p>Set when the state is forced, not when the grab is taken: the marquee is
+	 * animated off wall-clock time, so it needs the whole settle to travel before the
+	 * shot. Setting it immediately before the grab captured frame zero every time.
+	 */
+	private static void applyBookHover() {
+		if (currentBook == null) {
+			return;
+		}
+
+		switch (bookStepIndex) {
+			case 1 -> currentBook.debugHoverFirstTask();
+			case 2 -> currentBook.debugHoverFirstMarker();
+			default -> currentBook.debugClearHover();
+		}
+	}
+
+	/** Last book state to force. */
+	private static final int BOOK_LAST = 2;
+
+	private static void bookShoot(Minecraft client) {
+		// Named per step: the copy step runs several ticks later, so a shared name
+		// meant each shot overwrote the last and only the final state survived.
+		bookShotName = "book-" + bookStepIndex + ".png";
+
+		try {
+			Path dir = client.gameDirectory.toPath().resolve(OUT_DIR);
+			Files.createDirectories(dir);
+			Path shots = client.gameDirectory.toPath().resolve("screenshots");
+
+			Set<Path> before = new HashSet<>();
+			if (Files.isDirectory(shots)) {
+				try (var s = Files.list(shots)) {
+					s.forEach(before::add);
+				}
+			}
+
+			Screenshot.grab(client, false);
+			pendingCopy = before;
+			pendingCopyStep = bookStepIndex;
+			pendingCopyName = bookShotName;
+			pendingCopyState = currentBook != null ? currentBook.debugState() : "?";
+			copyTries = 120;
+		} catch (Exception e) {
+			QuestBook.LOGGER.error("Book screenshot failed", e);
+		}
+	}
+
+	/** Output name for the shot in flight. */
+	private static String bookShotName = "book.png";
+	/** Output file name for the pending copy; set by the run that requested it. */
+	private static String pendingCopyName = null;
 	private static void shoot(Minecraft client) {
 		try {
 			Path dir = client.gameDirectory.toPath().resolve(OUT_DIR);
@@ -250,7 +359,10 @@ public final class EditorDebugDriver {
 			return;
 		}
 		try (var s = Files.list(dir)) {
-			s.filter(p -> p.getFileName().toString().startsWith("state-"))
+			s.filter(p -> {
+						String n = p.getFileName().toString();
+						return n.startsWith("state-") || n.startsWith("book-");
+					})
 					.forEach(p -> {
 						try {
 							Files.deleteIfExists(p);
@@ -315,14 +427,17 @@ public final class EditorDebugDriver {
 				return;
 			}
 
-			Path out = dir.resolve("state-" + pendingCopyStep + ".png");
+			Path out = dir.resolve(pendingCopyName != null
+					? pendingCopyName
+					: "state-" + pendingCopyStep + ".png");
 			Files.copy(copyCandidate, out, StandardCopyOption.REPLACE_EXISTING);
-			QuestBook.LOGGER.info("Editor shot state {} -> {} ({} bytes)", pendingCopyStep, out, size);
-			QuestBook.LOGGER.info("Editor state {}", pendingCopyState);
-			if (current != null) {
+			QuestBook.LOGGER.info("Shot {} -> {} ({} bytes)", pendingCopyStep, out, size);
+			QuestBook.LOGGER.info("State {}", pendingCopyState);
+			if (pendingCopyName != null && currentBook != null) {
+				QuestBook.LOGGER.info("Book {}", currentBook.debugState());
+			}
+			if (pendingCopyName == null && current != null) {
 				QuestBook.LOGGER.info("Editor geometry {}", current.debugGeometry());
-				QuestBook.LOGGER.info("Editor grid {}", current.debugGridState());
-				QuestBook.LOGGER.info("Editor search value {:?}", current.debugSearchValue());
 			}
 			resetShot();
 		} catch (Exception e) {
@@ -335,5 +450,6 @@ public final class EditorDebugDriver {
 		pendingCopy = null;
 		copyCandidate = null;
 		copyCandidateSize = -1;
+		pendingCopyName = null;
 	}
 }
