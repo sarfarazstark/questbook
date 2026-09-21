@@ -674,18 +674,20 @@ public final class AdminQuestScreen extends Screen {
 		int statusColor = task.complete() ? TEXT_GREEN : TEXT_DIM;
 		g.text(font, statusIcon, x + 3, y + 3, statusColor, false);
 
-		// Label & Count — the name is clamped on its own so a long name never eats the count.
-		String countSuffix = " x" + task.need();
-		String label = font.plainSubstrByWidth(task.label(), Math.max(8, w - 66 - font.width(countSuffix))) + countSuffix;
-		g.text(font, label, x + 12, y + 3, isTaskEditing ? TEXT_GOLD : (task.complete() ? TEXT_MUTED : TEXT_WHITE), false);
-
-		// Assignee Chip — same UUID-stub handling as the picker pill.
+		// Assignee Chip — same UUID-stub handling as the picker pill. Laid out first:
+		// the label clamps against it so a long item name can never run underneath.
 		String assignee = resolveTaskAssigneeLabel(task);
 		int assignW = Math.min(font.width(assignee) + 4, 40);
 		int assignX = x + w - assignW - 12;
 		g.fill(assignX, y + 2, assignX + assignW, y + rowH - 2, 0x40000000);
 		int nameColor = task.assignee().equals(Task.UNASSIGNED) ? TEXT_RED : TEXT_CYAN;
 		g.text(font, font.plainSubstrByWidth(assignee, assignW - 2), assignX + 2, y + 3, nameColor, false);
+
+		// Label & Count — clamped to stop before the chip.
+		String countSuffix = " x" + task.need();
+		int labelMax = Math.max(8, assignX - 6 - (x + 12) - font.width(countSuffix));
+		String label = font.plainSubstrByWidth(task.label(), labelMax) + countSuffix;
+		g.text(font, label, x + 12, y + 3, isTaskEditing ? TEXT_GOLD : (task.complete() ? TEXT_MUTED : TEXT_WHITE), false);
 
 		// Delete [✕] — TEXT_MUTED, not TEXT_DIM. Measured against this row's own
 		// background, DIM lands at 2.49:1, about half the readable minimum, so the
