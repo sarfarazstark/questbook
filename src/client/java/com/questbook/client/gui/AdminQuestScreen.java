@@ -762,10 +762,12 @@ public final class AdminQuestScreen extends Screen {
 		g.fill(modalX, modalY, modalX + EDIT_MODAL_W, modalY + 20, HEADER_BG);
 		g.fill(modalX, modalY + 20, modalX + EDIT_MODAL_W, modalY + 21, CARD_SELECTED_BORDER);
 
+		// Quest name in the modal header, so the modal states which quest it edits.
 		AdminSyncPayload.AdminQuestEntry quest = selectedQuest();
 		AdminSyncPayload.AdminTaskEntry task = editingTask(quest);
 
-		g.text(font, "Edit Task", modalX + 8, modalY + 6, TEXT_GOLD, false);
+		String modalTitle = "Edit Task" + (quest == null ? "" : " \u00b7 " + quest.name());
+		g.text(font, font.plainSubstrByWidth(modalTitle, EDIT_MODAL_W - 40), modalX + 8, modalY + 6, TEXT_GOLD, false);
 
 		// [✕] Close
 		int closeX = modalX + EDIT_MODAL_W - 14;
@@ -854,12 +856,11 @@ public final class AdminQuestScreen extends Screen {
 		int w = rightPaneWidth - 8;
 		int x = rightPaneLeft + 4;
 
-		// Header is pinned: title and rule never scroll, so rows sliding up are
-		// clipped at the content edge instead of drawing over them.
+		// No quest title here: the selected quest card on the left already highlights.
+		// The rule stays as the pinned top divider above the scrolling rows.
 		int headerH = rightHeaderHeight();
-		g.text(font, font.plainSubstrByWidth(quest.name(), w), x, listTop + HDR_TITLE_Y, TEXT_GOLD, false);
 
-		int ruleY = listTop + HDR_TITLE_Y + HDR_RULE_GAP;
+		int ruleY = listTop;
 		g.fill(x, ruleY, x + w, ruleY + HDR_RULE_H, PANEL_BORDER);
 
 		// Tasks live below the header and are clipped to the content box, so the
@@ -915,9 +916,9 @@ public final class AdminQuestScreen extends Screen {
 	/** Gap between the rule and the first task row. */
 	private static final int HDR_RULE_TO_TASKS = 6;
 
-	/** Height of the right-pane header block (title, rule, gap); shared by render and click hit-testing. */
+	/** Rule at the pane top plus the gap before the first task row. */
 	private int rightHeaderHeight() {
-		return HDR_TITLE_Y + HDR_RULE_GAP + HDR_RULE_H + HDR_RULE_TO_TASKS;
+		return HDR_RULE_H + HDR_RULE_TO_TASKS;
 	}
 
 	private AdminSyncPayload.AdminQuestEntry selectedQuest() {
