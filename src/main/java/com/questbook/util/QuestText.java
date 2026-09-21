@@ -29,37 +29,38 @@ public final class QuestText {
 		return comp;
 	}
 
-	public static MutableComponent tag(String label, int startRgb, int endRgb) {
+	/**
+	 * A short prefix tag: one accent glyph and a word, no trailing decoration.
+	 *
+	 * <p>The old form wrapped the label in {@code ✦ ... ✦} on every line, which made a
+	 * two-word announcement occupy half the chat width. Colour is carried by the label
+	 * alone now; the glyph marks the line and nothing more.
+	 */
+	public static MutableComponent tag(String label, int colour) {
 		MutableComponent comp = Component.empty();
-		comp.append(Component.literal("\u2726 ").withStyle(s -> s.withColor(startRgb)));
-		comp.append(chromatic(label, startRgb, endRgb));
-		comp.append(Component.literal(" \u2726 ").withStyle(s -> s.withColor(endRgb)));
+		comp.append(Component.literal("\u2726 ").withStyle(s -> s.withColor(colour)));
+		comp.append(Component.literal(label).withStyle(s -> s.withColor(colour)));
+		comp.append(Component.literal(" \u00a78\u00bb "));
 		return comp;
 	}
 
 	public static Component taskAssigned(String questName, String itemId, int count) {
-		MutableComponent msg = tag("QUEST", 0xFFA726, 0xFFD54F);
-		msg.append(Component.literal("\u00a77New task in "));
-		msg.append(chromatic(questName, 0x4FC3F7, 0x81C784));
-		msg.append(Component.literal("\u00a77: \u00a7f"));
-		msg.append(chromatic(count + "x " + displayName(itemId), 0xFFEE58, 0x81C784));
-		msg.append(Component.literal(" \u00a78(\u00a7bJ\u00a78 to view)"));
+		MutableComponent msg = tag("New task", 0xFFA726);
+		msg.append(Component.literal(count + "x " + displayName(itemId)).withStyle(s -> s.withColor(0xFFEE58)));
+		msg.append(Component.literal("\u00a77 in \u00a7f" + questName));
 		return msg;
 	}
 
 	public static Component taskCompleted(String playerName, String itemId, int count) {
-		MutableComponent msg = tag("TASK COMPLETE", 0x66BB6A, 0x81C784);
-		msg.append(chromatic(playerName, 0xFFD54F, 0xFFA726));
-		msg.append(Component.literal("\u00a77 collected "));
-		msg.append(chromatic(count + "x " + displayName(itemId), 0x81C784, 0x4FC3F7));
-		msg.append(Component.literal("\u00a7a \u2714"));
+		MutableComponent msg = tag("Done", 0x66BB6A);
+		msg.append(Component.literal(count + "x " + displayName(itemId)).withStyle(s -> s.withColor(0x81C784)));
+		msg.append(Component.literal("\u00a77 by \u00a7f" + playerName));
 		return msg;
 	}
 
 	public static Component questCompleted(String questName) {
-		MutableComponent msg = tag("GOAL COMPLETE", 0xFFD54F, 0xFF7043);
-		msg.append(chromatic(questName, 0xFFEE58, 0x81C784));
-		msg.append(Component.literal("\u00a77 completed by the team! \u00a76\u2605"));
+		MutableComponent msg = tag("Quest complete", 0xFFD54F);
+		msg.append(Component.literal(questName).withStyle(s -> s.withColor(0xFFEE58)));
 		return msg;
 	}
 
@@ -71,38 +72,41 @@ public final class QuestText {
 
 	// --- command output ------------------------------------------------------
 
-	/** The {@code ✦ QUESTBOOK ✦} brand tag every command line opens with. */
-	public static MutableComponent brand() {
-		return tag("QUESTBOOK", 0xFFA726, 0xFFD54F);
-	}
+	/**
+	 * Command output is prefixed with a single outcome glyph rather than a brand tag.
+	 *
+	 * <p>The old {@code ✦ QUESTBOOK ✦} prefix cost ~11 characters on every line of
+	 * every command, which pushed real output off the visible chat width and read as
+	 * shouting. One coloured glyph says the same thing in a tenth of the space.
+	 */
 
 	/** A command that did what it was asked. */
 	public static Component success(String message) {
-		MutableComponent msg = brand();
-		msg.append(Component.literal("\u00a7a "));
-		msg.append(Component.literal(message));
+		MutableComponent msg = Component.empty();
+		msg.append(Component.literal("\u2714 ").withStyle(s -> s.withColor(0x81C784)));
+		msg.append(Component.literal(message).withStyle(s -> s.withColor(0xE0E0E0)));
 		return msg;
 	}
 
 	/** A command that could not be carried out. */
 	public static Component failure(String message) {
-		MutableComponent msg = brand();
-		msg.append(Component.literal("\u00a7c "));
-		msg.append(Component.literal(message));
+		MutableComponent msg = Component.empty();
+		msg.append(Component.literal("\u2716 ").withStyle(s -> s.withColor(0xE57373)));
+		msg.append(Component.literal(message).withStyle(s -> s.withColor(0xE0E0E0)));
 		return msg;
 	}
 
 	/** Plain command output: neither good nor bad news. */
 	public static Component info(String message) {
-		MutableComponent msg = brand();
-		msg.append(Component.literal("\u00a7f "));
-		msg.append(Component.literal(message));
+		MutableComponent msg = Component.empty();
+		msg.append(Component.literal("\u00b7 ").withStyle(s -> s.withColor(0x9E9E9E)));
+		msg.append(Component.literal(message).withStyle(s -> s.withColor(0xE0E0E0)));
 		return msg;
 	}
 
 	/** An indented continuation line under {@link #success} or {@link #info}. */
 	public static Component sub(String message) {
-		return Component.literal("   \u00a78\u00bb \u00a77" + message);
+		return Component.literal("   \u00a78" + message);
 	}
 
 	/**

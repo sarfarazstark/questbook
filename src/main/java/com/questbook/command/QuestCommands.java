@@ -104,7 +104,7 @@ public final class QuestCommands {
 
 		// The id is printed so later subcommands can address the quest unambiguously,
 		// even when two quests share a name.
-		success(ctx, "Created quest '" + name + "' (" + quest.id() + ")");
+		success(ctx, "Created " + name + "  " + shortId(quest.id()));
 
 		return 1;
 	}
@@ -132,7 +132,7 @@ public final class QuestCommands {
 		sync(ctx);
 
 		success(ctx, "Added " + count + "x " + QuestText.displayName(item.toString())
-				+ " for " + player.getGameProfile().name() + " \u00a78(" + task.id() + ")");
+				+ " for " + player.getGameProfile().name() + "  " + shortId(task.id()));
 
 		return 1;
 	}
@@ -152,7 +152,7 @@ public final class QuestCommands {
 
 		data.setStore(data.store().withoutQuest(found.get().id()));
 		sync(ctx);
-		success(ctx, "Deleted quest '" + found.get().name() + "'");
+		success(ctx, "Deleted " + found.get().name());
 
 		return 1;
 	}
@@ -173,7 +173,7 @@ public final class QuestCommands {
 		Optional<Task> task = findTask(found.get(), StringArgumentType.getString(ctx, "task"));
 
 		if (task.isEmpty()) {
-			failure(ctx, "No such task. Tasks are named by UUID prefix — see /questbook list");
+			failure(ctx, "No such task id prefix");
 			return 0;
 		}
 
@@ -184,7 +184,6 @@ public final class QuestCommands {
 				t -> t.withAssignee(player.getUUID(), player.getGameProfile().name())));
 		sync(ctx);
 		success(ctx, "Assigned to " + player.getGameProfile().name());
-
 		return 1;
 	}
 
@@ -348,13 +347,16 @@ public final class QuestCommands {
 			MutableComponent head = Component.empty();
 			head.append(QuestText.treeRow(quest.name(),
 					quest.completedCount(), quest.tasks().size()));
-			head.append(Component.literal(" \u00a78[" + quest.id() + "]"));
+			head.append(Component.literal("  " + shortId(quest.id())));
 			ctx.getSource().sendSuccess(() -> head, false);
 
 			for (Task task : quest.tasks()) {
+				// Short id, not the full UUID: this line is read, not copied whole, and
+				// findTask matches the printed prefix.
 				ctx.getSource().sendSuccess(() -> QuestText.sub(QuestText.displayName(task.itemId())
-						+ "  " + task.cappedProgress() + "/" + task.count()
-						+ "  " + task.id() + "  player=" + task.assignee()), false);
+						+ " " + task.cappedProgress() + "/" + task.count()
+						+ "  " + task.id().toString().substring(0, 8)
+						+ "  " + task.assigneeName()), false);
 			}
 		}
 
@@ -398,9 +400,15 @@ public final class QuestCommands {
 		return id.toString().substring(0, 8);
 	}
 
-	/** A quest name in the same gradient as the book, so output matches the UI. */
-	private static Component chromaticName(String name) {
-		return QuestText.chromatic(name, 0x4FC3F7, 0x81C784);
+	/**
+	 * First segment of a UUID, for command output.
+	 *
+	 * <p>A full UUID is 36 characters and is what made these lines unreadable in chat.
+	 * Eight hex digits is what {@link #findTask} already matches on as a prefix, so a
+	 * printed id stays copy-pasteable into the next command.
+	 */
+	private static String shortId(UUID id) {
+		return "\u00a78" + id.toString().substring(0, 8);
 	}
 
 	/** The saved data for the command's server, or null after reporting the problem. */
