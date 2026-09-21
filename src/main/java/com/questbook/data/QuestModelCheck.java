@@ -36,6 +36,7 @@ public final class QuestModelCheck {
 		checkMissingPrerequisite();
 		checkTaskReward();
 		checkPlayerStats();
+		checkAssigneeNamePersists();
 		checkBackwardCompatibleDocument();
 
 		if (failures > 0) {
@@ -134,7 +135,7 @@ public final class QuestModelCheck {
 		// Progress updates must not silently drop the pin.
 		expect("advance keeps the pin", pinned.advance(1).pinned());
 		expect("withProgress keeps the pin", pinned.withProgress(2).pinned());
-		expect("withAssignee keeps the pin", pinned.withAssignee(alex).pinned());
+		expect("withAssignee keeps the pin", pinned.withAssignee(alex, "Alex").pinned());
 
 		// And unpinning clears it.
 		expect("withPinned(false) clears the flag", !pinned.withPinned(false).pinned());
@@ -307,7 +308,7 @@ public final class QuestModelCheck {
 		// silently disappears the first time the task is advanced.
 		expect("advance keeps the reward", paid.advance(1).reward().isPresent());
 		expect("withProgress keeps the reward", paid.withProgress(2).reward().isPresent());
-		expect("withAssignee keeps the reward", paid.withAssignee(alex).reward().isPresent());
+		expect("withAssignee keeps the reward", paid.withAssignee(alex, "Alex").reward().isPresent());
 		expect("withPinned keeps the reward", paid.withPinned(true).reward().isPresent());
 		expect("updateTask through the quest keeps the reward",
 				Quest.create("Cottage").withTask(paid).updateTask(paid.id(), t -> t.advance(1))
@@ -374,6 +375,57 @@ public final class QuestModelCheck {
 		// Ranking twice must produce the same order.
 		expect("ranking is deterministic",
 				tieRanked.get(0).getKey().equals(PlayerStats.ranked(tied).get(0).getKey()));
+	}
+
+	/**
+	 * The assignee's name must outlive their session.
+	 *
+	 * <p>A UUID cannot be turned back into a name, so a name resolved only from the
+	 * online player list shows a stub the moment the assignee logs out. Recording it on
+	 * the task is what makes the label survive, and it must do so through every mutation
+	 * and through the disk round trip.
+	 */
+	private static void checkAssigneeNamePersists() {
+		UUID alex = UUID.randomUUID();
+		Task task = Task.create("minecraft:oak_log", 4, alex, "Alex");
+
+		expect("create records the name", task.assigneeName().equals("Alex"));
+
+		// Every rebuild must carry it, or the name is lost the first time progress ticks.
+		expect("advance keeps the name", task.advance(1).assigneeName().equals("Alex"));
+		expect("withProgress keeps the name", task.withProgress(1).assigneeName().equals("Alex"));
+		expect("withPinned keeps the name", task.withPinned(true).assigneeName().equals("Alex"));
+		expect("withReward keeps the name",
+				task.withReward(Optional.of(Reward.item("minecraft:diamond", 1)))
+						.assigneeName().equals("Alex"));
+
+		// Reassignment records the new name at the same moment as the new id, so the
+		// two cannot disagree about who the assignee was.
+		UUID sam = UUID.randomUUID();
+		Task reassigned = task.withAssignee(sam, "Sam");
+		expect("reassign updates the name", reassigned.assigneeName().equals("Sam"));
+		expect("reassign updates the id", reassigned.assignee().equals(sam));
+
+		// An edit changes amount and assignee together, never the item.
+		Task edited = task.withCountAndAssignee(10, sam, "Sam");
+		expect("edit updates the count", edited.count() == 10);
+		expect("edit updates the assignee", edited.assignee().equals(sam));
+		expect("edit updates the name", edited.assigneeName().equals("Sam"));
+		expect("edit leaves the item alone", edited.itemId().equals("minecraft:oak_log"));
+
+		// Shrinking below current progress must clamp, not read 70/64.
+		Task shrunk = task.advance(4).withCountAndAssignee(2, alex, "Alex");
+		expect("shrinking clamps progress", shrunk.progress() == 2);
+		expect("a clamped task reads complete", shrunk.isComplete());
+
+		// Null is normalised, so no caller can store a null into a non-null field.
+		expect("null name normalises to empty",
+				Task.create("minecraft:stone", 1, alex, null).assigneeName().isEmpty());
+
+		// The disk round trip is the whole point: this is what survives a restart.
+		Quest quest = Quest.create("Cottage").withTask(task);
+		Task loaded = QuestStore.EMPTY.withQuest(quest).quests().get(0).tasks().get(0);
+		expect("store keeps the assignee name", loaded.assigneeName().equals("Alex"));
 	}
 
 	/**

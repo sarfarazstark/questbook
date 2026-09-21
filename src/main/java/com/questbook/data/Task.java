@@ -22,14 +22,19 @@ import java.util.UUID;
  * @param id       stable identity, generated on creation
  * @param itemId   registry id of the item to collect, e.g. {@code minecraft:oak_log}
  * @param count    how many are required; always >= 1
- * @param assignee the only player whose pickups count toward this task
- * @param progress how many the assignee has collected so far
- * @param pinned   whether the assignee pinned this task to their HUD. Per-task is
- *                 correct rather than per-player: a task has exactly one
- *                 assignee, so a pin belongs to that pairing.
- * @param reward   granted to the assignee alone on completion; absent means none
+ * @param assignee     the only player whose pickups count toward this task
+ * @param assigneeName the assignee's name as it was when assigned. Stored rather than
+ *                     looked up because a name is not derivable from a UUID once the
+ *                     player is offline — the lookup degrades to a UUID stub, which is
+ *                     not a name. Recorded at assignment time and kept even after the
+ *                     assignee logs out; empty when unknown, as in a legacy save.
+ * @param progress     how many the assignee has collected so far
+ * @param pinned       whether the assignee pinned this task to their HUD. Per-task is
+ *                     correct rather than per-player: a task has exactly one
+ *                     assignee, so a pin belongs to that pairing.
+ * @param reward       granted to the assignee alone on completion; absent means none
  */
-public record Task(UUID id, String itemId, int count, UUID assignee, int progress,
+public record Task(UUID id, String itemId, int count, UUID assignee, String assigneeName, int progress,
 		boolean pinned, Optional<Reward> reward) {
 	/** Disk form. Field names are the on-disk keys, so rename them only with a data fix. */
 	public static final Codec<Task> CODEC = RecordCodecBuilder.create(instance -> instance.group(
@@ -37,6 +42,9 @@ public record Task(UUID id, String itemId, int count, UUID assignee, int progres
 			Codec.STRING.fieldOf("item").forGetter(Task::itemId),
 			Codec.INT.fieldOf("count").forGetter(Task::count),
 			UUIDUtil.CODEC.fieldOf("assignee").forGetter(Task::assignee),
+			// Optional so a save written before names were recorded still decodes; those
+			// tasks fall back to a live lookup until next re-assigned.
+			Codec.STRING.optionalFieldOf("assignee_name", "").forGetter(Task::assigneeName),
 			Codec.INT.optionalFieldOf("progress", 0).forGetter(Task::progress),
 			Codec.BOOL.optionalFieldOf("pinned", false).forGetter(Task::pinned),
 			Reward.CODEC.optionalFieldOf("reward").forGetter(Task::reward)
@@ -49,10 +57,15 @@ public record Task(UUID id, String itemId, int count, UUID assignee, int progres
 		if (count < 1) {
 			throw new IllegalArgumentException("count must be >= 1, got " + count);
 		}
+		assigneeName = assigneeName == null ? "" : assigneeName;
 	}
 
 	public static Task create(String itemId, int count, UUID assignee) {
-		return new Task(UUID.randomUUID(), itemId, count, assignee, 0, false, Optional.empty());
+		return create(itemId, count, assignee, "");
+	}
+
+	public static Task create(String itemId, int count, UUID assignee, String assigneeName) {
+		return new Task(UUID.randomUUID(), itemId, count, assignee, assigneeName, 0, false, Optional.empty());
 	}
 
 	public boolean isUnassigned() {
@@ -74,19 +87,37 @@ public record Task(UUID id, String itemId, int count, UUID assignee, int progres
 	}
 
 	public Task withProgress(int newProgress) {
-		return new Task(id, itemId, count, assignee, Math.max(0, newProgress), pinned, reward);
+		return new Task(id, itemId, count, assignee, assigneeName, Math.max(0, newProgress), pinned, reward);
 	}
 
-	public Task withAssignee(UUID newAssignee) {
-		return new Task(id, itemId, count, newAssignee, progress, pinned, reward);
+	/**
+	 * Reassigns, recording the new name alongside the id. The name is stored at the
+	 * same moment as the id so the two cannot disagree about who the assignee was.
+	 */
+	public Task withAssignee(UUID newAssignee, String newAssigneeName) {
+		return new Task(id, itemId, count, newAssignee, newAssigneeName == null ? "" : newAssigneeName,
+				progress, pinned, reward);
+	}
+
+	/**
+	 * Changes the amount and the assignee together — what an edit does. The item is
+	 * untouched by construction, so no caller can accidentally swap it. Progress is
+	 * clamped down to the new requirement rather than left able to read 70/64.
+	 */
+	public Task withCountAndAssignee(int newCount, UUID newAssignee, String newAssigneeName) {
+		if (newCount < 1) {
+			throw new IllegalArgumentException("count must be >= 1, got " + newCount);
+		}
+		return new Task(id, itemId, newCount, newAssignee,
+				newAssigneeName == null ? "" : newAssigneeName, Math.min(progress, newCount), pinned, reward);
 	}
 
 	public Task withPinned(boolean newPinned) {
-		return new Task(id, itemId, count, assignee, progress, newPinned, reward);
+		return new Task(id, itemId, count, assignee, assigneeName, progress, newPinned, reward);
 	}
 
 	public Task withReward(Optional<Reward> newReward) {
-		return new Task(id, itemId, count, assignee, progress, pinned, newReward);
+		return new Task(id, itemId, count, assignee, assigneeName, progress, pinned, newReward);
 	}
 
 	/** Adds to progress, clamped at the requirement. */

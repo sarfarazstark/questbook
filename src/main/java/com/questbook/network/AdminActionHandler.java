@@ -102,9 +102,10 @@ public final class AdminActionHandler {
 			return;
 		}
 		UUID newAssignee = payload.newTasks().getFirst().assignee();
+		String newName = resolvePlayerName(server, newAssignee);
 		data.setStore(data.store().updateQuest(payload.questId(), g -> {
 			g.task(payload.taskId()).ifPresent(t -> notifyAssignee(server, newAssignee, g.name(), t.itemId(), t.count()));
-			return g.updateTask(payload.taskId(), t -> t.withAssignee(newAssignee));
+			return g.updateTask(payload.taskId(), t -> t.withAssignee(newAssignee, newName));
 		}));
 		QuestNetworking.syncAll(server);
 		syncAllAdmins(server, data);
@@ -118,7 +119,8 @@ public final class AdminActionHandler {
 		if (taskData.count() < 1) {
 			return;
 		}
-		Task task = Task.create(taskData.itemId(), taskData.count(), taskData.assignee());
+		Task task = Task.create(taskData.itemId(), taskData.count(), taskData.assignee(),
+				resolvePlayerName(server, taskData.assignee()));
 		data.setStore(data.store().updateQuest(payload.questId(), g -> {
 			notifyAssignee(server, taskData.assignee(), g.name(), taskData.itemId(), taskData.count());
 			return g.withTask(task);
@@ -135,11 +137,13 @@ public final class AdminActionHandler {
 		if (taskData.count() < 1) {
 			return;
 		}
+		String newName = resolvePlayerName(server, taskData.assignee());
 		data.setStore(data.store().updateQuest(payload.questId(), g -> {
 			notifyAssignee(server, taskData.assignee(), g.name(), taskData.itemId(), taskData.count());
-			return g.updateTask(payload.taskId(), t ->
-					new Task(t.id(), taskData.itemId(), taskData.count(), taskData.assignee(), Math.min(t.progress(), taskData.count()), t.pinned(), t.reward())
-			);
+			// itemId comes from the payload but the caller sends the task's existing one:
+			// an edit changes amount and assignee, never the item.
+			return g.updateTask(payload.taskId(), t -> t.withCountAndAssignee(
+					taskData.count(), taskData.assignee(), newName));
 		}));
 		QuestNetworking.syncAll(server);
 		syncAllAdmins(server, data);
@@ -215,7 +219,7 @@ public final class AdminActionHandler {
 		for (Quest quest : data.store().quests()) {
 			List<AdminSyncPayload.AdminTaskEntry> taskEntries = new ArrayList<>();
 			for (Task task : quest.tasks()) {
-				String assigneeName = resolvePlayerName(server, task.assignee());
+				String assigneeName = assigneeDisplayName(server, task);
 				String label = displayName(task.itemId());
 				taskEntries.add(new AdminSyncPayload.AdminTaskEntry(
 						task.id(),
@@ -252,15 +256,38 @@ public final class AdminActionHandler {
 		ServerPlayNetworking.send(player, new AdminSyncPayload(questEntries, onlinePlayers));
 	}
 
-	private static String resolvePlayerName(MinecraftServer server, UUID uuid) {
-		if (uuid.equals(Task.UNASSIGNED)) {
+	/**
+	 * Who to show for a task's assignee.
+	 *
+	 * <p>Preference order: the name stored on the task, then a live lookup for a task
+	 * saved before names were recorded. The stored name is what makes an assignee survive
+	 * a logout — a UUID cannot be turned back into a name, so a live-only lookup would
+	 * show a stub for anyone offline. A live lookup still runs first for an unnamed
+	 * legacy task, which is the one case where the store has nothing to offer.
+	 */
+	private static String assigneeDisplayName(MinecraftServer server, Task task) {
+		if (task.isUnassigned()) {
 			return "Unassigned";
 		}
-		ServerPlayer p = server.getPlayerList().getPlayer(uuid);
+		if (!task.assigneeName().isEmpty()) {
+			return task.assigneeName();
+		}
+		ServerPlayer p = server.getPlayerList().getPlayer(task.assignee());
 		if (p != null) {
 			return p.getGameProfile().name();
 		}
-		return uuid.toString().substring(0, 8);
+		// Legacy task for someone gone: no name was ever recorded and none can be
+		// recovered. Say so rather than presenting a UUID fragment as a name.
+		return "Unknown player";
+	}
+
+	/** The assignee's name at the moment of assignment, for storing on the task. */
+	private static String resolvePlayerName(MinecraftServer server, UUID uuid) {
+		if (uuid == null || uuid.equals(Task.UNASSIGNED)) {
+			return "";
+		}
+		ServerPlayer p = server.getPlayerList().getPlayer(uuid);
+		return p != null ? p.getGameProfile().name() : "";
 	}
 
 	private static String displayName(String itemId) {

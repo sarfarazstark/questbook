@@ -368,8 +368,8 @@ public final class AdminQuestScreen extends Screen {
 		/** Pixels between the left border and the first glyph. */
 		private static final int TEXT_PAD = 4;
 
-		private final int pinnedX;
-		private final int pinnedY;
+		private int pinnedX;
+		private int pinnedY;
 		private final Font textFont;
 		/** Drawn when the value is empty; null when the field has no placeholder. */
 		private String hint;
@@ -391,6 +391,19 @@ public final class AdminQuestScreen extends Screen {
 		/** Placeholder for an empty field. Blank or null hides it. */
 		void setHintText(String text) {
 			this.hint = text == null || text.isEmpty() ? null : text;
+		}
+
+		/**
+		 * Moves the field. {@code pinnedX/pinnedY} are final so that the render override
+		 * can restore them; a field that has to draw in more than one place (the count
+		 * box lives in both the picker footer and the inline edit row) needs a way to
+		 * change where "pinned" means.
+		 */
+		void reposition(int x, int y) {
+			pinnedX = x;
+			pinnedY = y;
+			setX(x);
+			setY(y);
 		}
 
 		@Override
@@ -442,12 +455,6 @@ public final class AdminQuestScreen extends Screen {
 
 	@Override
 	public void extractRenderState(GuiGraphicsExtractor g, int mouseX, int mouseY, float partialTick) {
-		// Debug capture only: park the pointer so a shot can show a hover-only surface
-		// such as a tab tooltip, which no static state can reproduce.
-		if (hoverOverrideX >= 0) {
-			mouseX = hoverOverrideX;
-			mouseY = hoverOverrideY;
-		}
 		// A sync can arrive while this screen is open; keep the pane populated.
 		ensureSelection();
 
@@ -465,21 +472,26 @@ public final class AdminQuestScreen extends Screen {
 		// Right: Quest Content
 		renderRightPane(g, mouseX, mouseY);
 
-		// Update widget visibility
+		// Update widget visibility. The count field serves the picker's Amount box and the
+		// inline edit row, whose rows are at different y positions, so it must follow
+		// whichever is active or it draws inside the wrong container.
 		if (itemSearchField != null) itemSearchField.visible = itemPickerOpen;
-		if (countField != null) countField.visible = itemPickerOpen;
-		if (newQuestNameField != null) newQuestNameField.visible = newQuestDialogOpen;
-
-		// After the widget tick, so the search responder's resets have already landed.
-		if (pendingReveal != null && itemPickerOpen) {
-			Item toReveal = pendingReveal;
-			pendingReveal = null;
-			revealItem(toReveal);
+		if (countField != null) {
+			countField.visible = itemPickerOpen || editingTaskId != null;
+			if (itemPickerOpen) {
+				countField.reposition(amountFieldX(), pickerBottomY());
+			} else if (editingTaskId != null) {
+				countField.reposition(editModalCountX(), editModalCountY());
+			}
 		}
+		if (newQuestNameField != null) newQuestNameField.visible = newQuestDialogOpen;
 
 		// Modal frames (rendered BEFORE widgets so their EditBoxes are drawn on top)
 		if (newQuestDialogOpen) {
 			renderNewQuestDialog(g, mouseX, mouseY);
+		}
+		if (editingTaskId != null) {
+			renderTaskEditDialog(g, mouseX, mouseY);
 		}
 		if (itemPickerOpen) {
 			renderItemPickerModal(g, mouseX, mouseY);
@@ -640,6 +652,121 @@ public final class AdminQuestScreen extends Screen {
 		return y + rowH + 1;
 	}
 
+	/** Item behind a task's id, or null if the id no longer resolves. */
+	private static Item itemOf(AdminSyncPayload.AdminTaskEntry task) {
+		Identifier id = Identifier.tryParse(task.itemId());
+		if (id == null) {
+			return null;
+		}
+		Item item = BuiltInRegistries.ITEM.getValue(id);
+		return item == Items.AIR ? null : item;
+	}
+
+	// --- MODAL: EDIT TASK ----------------------------------------------------
+
+	/** Modal geometry, shared by render, click and the count field's placement. */
+	private static final int EDIT_MODAL_W = 240;
+	private static final int EDIT_MODAL_H = 96;
+
+	private int editModalX() {
+		return (width - EDIT_MODAL_W) / 2;
+	}
+
+	private int editModalY() {
+		return (height - EDIT_MODAL_H) / 2;
+	}
+
+	/**
+	 * Edits a task's amount and assignee. A modal, not an inline row: the pane is too
+	 * narrow for a field and two buttons, and this screen already uses a modal for the
+	 * other focused edit. There is deliberately no item picker — changing what a quest
+	 * asks for is a different task, not an edit of this one, so the item is shown as a
+	 * fixed icon.
+	 */
+	private void renderTaskEditDialog(GuiGraphicsExtractor g, int mouseX, int mouseY) {
+		int modalX = editModalX();
+		int modalY = editModalY();
+
+		g.fill(0, 0, width, height, 0x90000000);
+		g.fill(modalX - 1, modalY - 1, modalX + EDIT_MODAL_W + 1, modalY + EDIT_MODAL_H + 1, 0xFF000000);
+		g.fill(modalX, modalY, modalX + EDIT_MODAL_W, modalY + EDIT_MODAL_H, PANEL_BG);
+		g.fill(modalX, modalY, modalX + EDIT_MODAL_W, modalY + 20, HEADER_BG);
+		g.fill(modalX, modalY + 20, modalX + EDIT_MODAL_W, modalY + 21, CARD_SELECTED_BORDER);
+
+		AdminSyncPayload.AdminQuestEntry quest = selectedQuest();
+		AdminSyncPayload.AdminTaskEntry task = editingTask(quest);
+
+		g.text(font, "Edit Task", modalX + 8, modalY + 6, TEXT_GOLD, false);
+
+		// [✕] Close
+		int closeX = modalX + EDIT_MODAL_W - 14;
+		int closeY = modalY + 6;
+		boolean closeHover = mouseX >= closeX - 2 && mouseX <= closeX + 10 && mouseY >= closeY - 2 && mouseY <= closeY + 10;
+		g.text(font, "\u2715", closeX, closeY, closeHover ? TEXT_RED : TEXT_MUTED, false);
+
+		if (task == null) {
+			return;
+		}
+
+		// The item, fixed. Icon + name, so it is obvious which task is being edited
+		// without offering a way to change it.
+		Item item = itemOf(task);
+		if (item != null) {
+			g.item(new ItemStack(item), modalX + 10, modalY + 26);
+		}
+		g.text(font, font.plainSubstrByWidth(task.label(), EDIT_MODAL_W - 46),
+				modalX + 30, modalY + 30, TEXT_WHITE, false);
+
+		// Amount row. The field itself is the count EditBox, positioned by initControls.
+		g.text(font, AMOUNT_LABEL, modalX + 10, modalY + 48, TEXT_MUTED, false);
+
+		// Assignee pill
+		int pillY = modalY + 45;
+		int pillX = modalX + 10 + font.width(AMOUNT_LABEL) + LABEL_GAP + AMOUNT_FIELD_W + 6;
+		int pillW = modalX + EDIT_MODAL_W - 10 - pillX;
+		boolean pillHover = mouseX >= pillX && mouseX <= pillX + pillW && mouseY >= pillY && mouseY <= pillY + 14;
+		g.fill(pillX, pillY, pillX + pillW, pillY + 14, pillHover ? BTN_SECONDARY_HOVER : BTN_SECONDARY);
+		String assignLabel = resolveAssigneeLabel();
+		int assignColor = selectedAssigneeId.equals(Task.UNASSIGNED) ? TEXT_RED : TEXT_GREEN;
+		g.text(font, font.plainSubstrByWidth("\u25BE " + assignLabel, pillW - 8), pillX + 4, pillY + 3, assignColor, false);
+
+		// Buttons
+		int btnY = modalY + EDIT_MODAL_H - 22;
+		int saveW = font.width("Save") + 10;
+		int saveX = modalX + EDIT_MODAL_W - saveW - 10;
+		boolean saveHover = mouseX >= saveX && mouseX <= saveX + saveW && mouseY >= btnY && mouseY <= btnY + 16;
+		g.fill(saveX, btnY, saveX + saveW, btnY + 16, saveHover ? BTN_PRIMARY_HOVER : BTN_PRIMARY);
+		g.text(font, "Save", saveX + 5, btnY + 4, TEXT_WHITE, false);
+
+		int cancelW = font.width("Cancel") + 8;
+		int cancelX = saveX - cancelW - 6;
+		boolean cancelHover = mouseX >= cancelX && mouseX <= cancelX + cancelW && mouseY >= btnY && mouseY <= btnY + 16;
+		g.fill(cancelX, btnY, cancelX + cancelW, btnY + 16, cancelHover ? BTN_SECONDARY_HOVER : BTN_SECONDARY);
+		g.text(font, "Cancel", cancelX + 4, btnY + 4, TEXT_MUTED, false);
+	}
+
+	/** The task currently open in the edit modal, or null. */
+	private AdminSyncPayload.AdminTaskEntry editingTask(AdminSyncPayload.AdminQuestEntry quest) {
+		if (quest == null || editingTaskId == null) {
+			return null;
+		}
+		for (AdminSyncPayload.AdminTaskEntry task : quest.tasks()) {
+			if (task.id().equals(editingTaskId)) {
+				return task;
+			}
+		}
+		return null;
+	}
+
+	/** Where the modal's count field goes, so the widget and the drawn label agree. */
+	private int editModalCountX() {
+		return editModalX() + 10 + font.width(AMOUNT_LABEL) + LABEL_GAP;
+	}
+
+	private int editModalCountY() {
+		return editModalY() + 45;
+	}
+
 	// --- RIGHT PANE (QUEST CONTENT) ------------------------------------------
 
 	private void renderRightPane(GuiGraphicsExtractor g, int mouseX, int mouseY) {
@@ -771,7 +898,7 @@ public final class AdminQuestScreen extends Screen {
 	}
 
 	private boolean modalOpen() {
-		return newQuestDialogOpen || itemPickerOpen;
+		return newQuestDialogOpen || itemPickerOpen || editingTaskId != null;
 	}
 
 	// --- MODAL: ITEM PICKER --------------------------------------------------
@@ -790,20 +917,9 @@ public final class AdminQuestScreen extends Screen {
 		g.fill(left, top, left + pickerWidth(), top + PICKER_HEADER_H, HEADER_BG);
 		g.fill(left, top + PICKER_HEADER_H, left + pickerWidth(), top + PICKER_HEADER_H + 1, CARD_SELECTED_BORDER);
 
-		// Header — title, then the selected item right beside it, then close top-right.
-		// Sharing the title's line means no second header row and nothing to collide
-		// with the tab strip below.
-		boolean isEditing = editingTaskId != null;
-		String title = isEditing ? "Edit Task Item" : "Select Item";
+		// Header — the picker only ever adds, so there is one title and no edit mode.
+		String title = "Add Task Item";
 		g.text(font, title, gridLeft(), top + 6, TEXT_GOLD, false);
-
-		if (!selectedItem.isEmpty()) {
-			String sel = selectedItem.getHoverName().getString();
-			int selX = gridLeft() + font.width(title) + 8;
-			int closeX = gridLeft() + gridWidth() - 8;
-			int selClipW = Math.max(0, closeX - 6 - selX);
-			g.text(font, font.plainSubstrByWidth(sel, selClipW), selX, top + 6, TEXT_GREEN, false);
-		}
 
 		// [✕] Close
 		int closeX = gridLeft() + gridWidth() - 8;
@@ -889,15 +1005,11 @@ public final class AdminQuestScreen extends Screen {
 		int countW = AMOUNT_FIELD_W;
 		int assignBtnX = countX + countW + 6;
 
-		String actionLabel = isEditing ? "\u2713 Update Task" : "+ Add Task";
+		String actionLabel = "+ Add Task";
 		int addBtnW = font.width(actionLabel) + 10;
 		int addBtnX = gridRight() - addBtnW;
-		// Cancel takes its width out of the row first; the pill gets what's left. It is
-		// drawn only if its label actually fits — a clipped "Offline p" reads worse than
-		// no pill, and the assignee is still visible in the task row.
-		int cancelBtnW = isEditing ? font.width("Cancel") + 8 : 0;
-		int cancelBtnX = isEditing ? addBtnX - cancelBtnW - 4 : addBtnX;
-		int assignBtnW = cancelBtnX - 6 - assignBtnX;
+		// Pill fills whatever the add button leaves, down to the count field.
+		int assignBtnW = addBtnX - 6 - assignBtnX;
 		String assignLabel = resolveAssigneeLabel();
 		boolean showAssign = assignBtnW >= font.width("\u25BE " + assignLabel) + 10;
 
@@ -915,20 +1027,13 @@ public final class AdminQuestScreen extends Screen {
 		boolean actHover = mouseX >= addBtnX && mouseX <= addBtnX + addBtnW && mouseY >= bottomY && mouseY <= bottomY + rowH;
 		g.fill(addBtnX, bottomY, addBtnX + addBtnW, bottomY + rowH, canAct ? (actHover ? BTN_PRIMARY_HOVER : BTN_PRIMARY) : 0xFF3E3E42);
 		g.text(font, actionLabel, addBtnX + 5, bottomY + 3, canAct ? TEXT_WHITE : TEXT_DIM, false);
-
-		if (isEditing) {
-			boolean cancelHover = mouseX >= cancelBtnX && mouseX <= cancelBtnX + cancelBtnW && mouseY >= bottomY && mouseY <= bottomY + rowH;
-			g.fill(cancelBtnX, bottomY, cancelBtnX + cancelBtnW, bottomY + rowH, cancelHover ? BTN_SECONDARY_HOVER : BTN_SECONDARY);
-			g.text(font, "Cancel", cancelBtnX + 4, bottomY + 3, TEXT_MUTED, false);
-		}
 	}
 
-	/** True when a resolved name is really the server's truncated-UUID fallback. */
-	private static boolean isUuidStub(UUID id, String name) {
-		return name != null && name.length() == 8 && name.equals(id.toString().substring(0, 8));
-	}
-
-	/** Assignee label for a task row: live name, else a human label, never a UUID. */
+	/**
+	 * Name to show for a task's assignee. The server now sends the name recorded at
+	 * assignment time, which survives a logout — so this only has to prefer the live
+	 * name for an assignee who is online right now (a player may have renamed).
+	 */
 	private String resolveTaskAssigneeLabel(AdminSyncPayload.AdminTaskEntry task) {
 		if (task.assignee().equals(Task.UNASSIGNED)) {
 			return "Unassigned";
@@ -938,14 +1043,14 @@ public final class AdminQuestScreen extends Screen {
 				return p.name();
 			}
 		}
-		return isUuidStub(task.assignee(), task.assigneeName()) ? "Offline player" : task.assigneeName();
+		String stored = task.assigneeName();
+		return stored == null || stored.isEmpty() ? "Unknown player" : stored;
 	}
 
 	/**
-	 * Name to show on the assignee pill. Prefers the server's resolved name, but that
-	 * degrades to a truncated UUID for an assignee who is offline, which reads as
-	 * corruption in the UI. In that case fall back to the online-player cache, and to
-	 * a plain label if they are gone entirely.
+	 * Name to show on the assignee pill. Same rule as {@link #resolveTaskAssigneeLabel}:
+	 * live name when the assignee is online, otherwise the name recorded when they were
+	 * assigned — which is what makes the label survive a logout.
 	 */
 	private String resolveAssigneeLabel() {
 		if (selectedAssigneeId.equals(Task.UNASSIGNED)) {
@@ -956,20 +1061,24 @@ public final class AdminQuestScreen extends Screen {
 				return p.name();
 			}
 		}
-		return isUuidStub(selectedAssigneeId, selectedAssigneeName) ? "Offline player" : selectedAssigneeName;
+		return selectedAssigneeName == null || selectedAssigneeName.isEmpty()
+				? "Unknown player" : selectedAssigneeName;
 	}
 
+	/** Opens the add-task picker. It never edits: see {@link #startEditingTask}. */
 	private void openItemPicker() {
 		itemPickerOpen = true;
+		editingTaskId = null;
 		if (itemSearchField != null) {
 			itemSearchField.visible = true;
+			itemSearchField.setValue("");
 		}
 		if (countField != null) {
 			countField.visible = true;
-			if (editingTaskId == null) {
-				countField.setValue("16");
-			}
+			countField.setValue("16");
 		}
+		selectedItem = ItemStack.EMPTY;
+		selectedGridIndex = -1;
 		pickerScroll = 0;
 	}
 
@@ -981,9 +1090,21 @@ public final class AdminQuestScreen extends Screen {
 		if (countField != null) {
 			countField.visible = false;
 		}
-		editingTaskId = null;
 		selectedItem = ItemStack.EMPTY;
 		selectedGridIndex = -1;
+	}
+
+	/** Selects a grid slot from the list currently on screen. */
+	private void selectGridIndex(int idx) {
+		String query = itemSearchField != null ? itemSearchField.getValue() : "";
+		List<ItemStack> items = ItemCatalog.filter(selectedTab, query);
+		if (idx < 0 || idx >= items.size()) {
+			selectedGridIndex = -1;
+			selectedItem = ItemStack.EMPTY;
+			return;
+		}
+		selectedGridIndex = idx;
+		selectedItem = items.get(idx).copy();
 	}
 
 	private boolean handlePickerModalClick(net.minecraft.client.input.MouseButtonEvent event, double mx, double my) {
@@ -1042,22 +1163,18 @@ public final class AdminQuestScreen extends Screen {
 			}
 		}
 
-		// Footer row: Amount / assignee pill / Add-Update / Cancel. Geometry is
-		// recomputed here rather than shared, so it must match the render path exactly
-		// or the hit-test drifts from the pixels.
+		// Footer row: Amount / assignee pill / Add. Geometry must match the render path
+		// exactly or the hit-test drifts from the pixels.
 		int bottomY = pickerBottomY();
 		int rowH = 14;
 		int countX = amountFieldX();
 		int countW = AMOUNT_FIELD_W;
 		int assignBtnX = countX + countW + 6;
 
-		boolean isEditing = editingTaskId != null;
-		String actionLabel = isEditing ? "\u2713 Update Task" : "+ Add Task";
+		String actionLabel = "+ Add Task";
 		int addBtnW = font.width(actionLabel) + 10;
 		int addBtnX = gridRight() - addBtnW;
-		int cancelBtnW = isEditing ? font.width("Cancel") + 8 : 0;
-		int cancelBtnX = isEditing ? addBtnX - cancelBtnW - 4 : addBtnX;
-		int assignBtnW = cancelBtnX - 6 - assignBtnX;
+		int assignBtnW = addBtnX - 6 - assignBtnX;
 		if (assignBtnW >= font.width("\u25BE " + resolveAssigneeLabel()) + 10
 				&& mx >= assignBtnX && mx <= assignBtnX + assignBtnW && my >= bottomY && my <= bottomY + rowH) {
 			assigneeDropdownOpen = true;
@@ -1067,15 +1184,8 @@ public final class AdminQuestScreen extends Screen {
 		}
 
 		if (mx >= addBtnX && mx <= addBtnX + addBtnW && my >= bottomY && my <= bottomY + rowH) {
-			executeTaskAction();
+			executeAddTask();
 			return true;
-		}
-
-		if (isEditing) {
-			if (mx >= cancelBtnX && mx <= cancelBtnX + cancelBtnW && my >= bottomY && my <= bottomY + rowH) {
-				closeItemPicker();
-				return true;
-			}
 		}
 
 		// Pass click through so itemSearchField / countField receive cursor clicks
@@ -1145,6 +1255,10 @@ public final class AdminQuestScreen extends Screen {
 			int top = pickerTop();
 			bx = Mth.clamp(assigneeDropdownX, left + 4, left + pickerWidth() - boxW - 4);
 			by = Mth.clamp(assigneeDropdownY - boxH - 2, top + 4, top + pickerHeight() - boxH - 4);
+		} else if (editingTaskId != null) {
+			bx = Mth.clamp(assigneeDropdownX, editModalX() + 4, editModalX() + EDIT_MODAL_W - boxW - 4);
+			by = Mth.clamp(assigneeDropdownY - boxH - 2, editModalY() + 4,
+					editModalY() + EDIT_MODAL_H - boxH - 4);
 		} else {
 			bx = Mth.clamp(assigneeDropdownX, panelLeft + 4, panelLeft + panelWidth - boxW - 4);
 			by = Mth.clamp(assigneeDropdownY - boxH - 2, panelTop + 4, panelTop + panelHeight - boxH - 4);
@@ -1191,6 +1305,18 @@ public final class AdminQuestScreen extends Screen {
 		// Handle Modal New Quest Dialog Clicks First
 		if (newQuestDialogOpen) {
 			return handleModalDialogClick(event, mx, my);
+		}
+
+		// Edit Task modal
+		if (editingTaskId != null) {
+			if (assigneeDropdownOpen) {
+				if (handleDropdownClick(mx, my)) {
+					return true;
+				}
+				assigneeDropdownOpen = false;
+				return true;
+			}
+			return handleEditModalClick(event, mx, my);
 		}
 
 		// Handle Item Picker Modal Clicks
@@ -1338,9 +1464,8 @@ public final class AdminQuestScreen extends Screen {
 	}
 
 	/**
-	 * Opens the picker in its edit-task form: title "Edit Task Item", a selected item
-	 * and an assigned player. That is the state with the assignee pill, the Cancel
-	 * button and the widest header, none of which the other shots exercise.
+	 * Opens the first task in the edit modal. The state to capture is the modal: the
+	 * item icon, the amount field, the assignee pill and Save/Cancel.
 	 */
 	public void debugOpenEditTask() {
 		AdminSyncPayload.AdminQuestEntry quest = selectedQuest();
@@ -1352,30 +1477,10 @@ public final class AdminQuestScreen extends Screen {
 			QuestBook.LOGGER.warn("Editor debug: quest '{}' has no tasks to edit", quest.name());
 			return;
 		}
+		// Clear the previous step's picker first: only one modal owns the screen.
+		closeItemPicker();
 		startEditingTask(quest, quest.tasks().get(0));
 	}
-
-	/**
-	 * Opens the picker with the mouse parked on a category tab, so the capture shows
-	 * the tab's tooltip. A tooltip only exists while hovering, so no other shot can
-	 * prove what it says. {@link #debugClearHover()} must follow, or the pointer stays
-	 * parked and the tooltip never goes away.
-	 */
-	public void debugHoverTab(int index) {
-		debugOpenPicker();
-		hoverOverrideX = gridLeft() + index * slotSize() + slotSize() / 2;
-		hoverOverrideY = pickerTabsY() + slotSize() / 2;
-	}
-
-	/** Releases the parked pointer so hover surfaces disappear again. */
-	public void debugClearHover() {
-		hoverOverrideX = -1;
-		hoverOverrideY = -1;
-	}
-
-	/** Parks the rendered mouse position; -1 disables. Set by debug hooks for shots. */
-	private int hoverOverrideX = -1;
-	private int hoverOverrideY = -1;
 	/** Value drawn in the search field, so a capture can assert it is where it looks. */
 	public String debugSearchValue() {
 		return itemSearchField == null ? "<null>" : itemSearchField.getValue();
@@ -1419,7 +1524,10 @@ public final class AdminQuestScreen extends Screen {
 		return "tab=" + selectedTab + " index=" + idx + " firstVisible=" + start
 				+ " visible=" + visible + " size=" + items.size()
 				+ " itemAt(index)=" + at
-				+ " selectedItem=" + (sel.isEmpty() ? "<empty>" : sel.getHoverName().getString());
+				+ " selectedItem=" + (sel.isEmpty() ? "<empty>" : sel.getHoverName().getString())
+				+ " editingTask=" + (editingTaskId != null)
+				+ " countValue=" + (countField == null ? "<null>" : countField.getValue())
+				+ " countVisible=" + (countField != null && countField.visible);
 	}
 
 	/** One-line geometry summary, for when a shot needs explaining. */
@@ -1518,80 +1626,38 @@ public final class AdminQuestScreen extends Screen {
 		return false;
 	}
 
+	/**
+	 * Opens a task for editing in {@link #renderTaskEditDialog}. Editing means its
+	 * amount and its assignee — the item is fixed once a task exists, because changing
+	 * what a quest asks for is not the same act as correcting how many: it is a
+	 * different task. Swapping the item is delete + add, which keeps the two intentions
+	 * distinct instead of hiding a replacement behind an "update".
+	 *
+	 * <p>So there is no picker here. The modal shows the item as a static icon.
+	 */
 	private void startEditingTask(AdminSyncPayload.AdminQuestEntry quest, AdminSyncPayload.AdminTaskEntry task) {
 		selectedQuestId = quest.id();
+		// Close either other modal: only one owns the screen at a time.
+		closeItemPicker();
+		newQuestDialogOpen = false;
+		if (newQuestNameField != null) {
+			newQuestNameField.visible = false;
+		}
 		editingTaskId = task.id();
 
 		selectedAssigneeId = task.assignee();
 		selectedAssigneeName = task.assigneeName();
+		assigneeDropdownOpen = false;
 
 		if (countField != null) {
 			countField.setValue(String.valueOf(task.need()));
 		}
-
-		// Open first: openItemPicker() resets pickerScroll, so any scroll set before it
-		// is discarded and the edited item stays below the fold. All reveal work below.
-		openItemPicker();
-
-		// Deferred by one tick: the search field's responder resets the selection during
-		// the next widget tick, so anything set inline here is wiped a frame later.
-		Identifier taskItemId = Identifier.tryParse(task.itemId());
-		pendingReveal = taskItemId != null ? BuiltInRegistries.ITEM.getValue(taskItemId) : null;
 	}
 
-	/** Item to reveal once the picker's own resets have run; see {@link #revealItem}. */
-	private Item pendingReveal;
-
-	/**
-	 * Selects the grid slot at {@code idx} in the tab currently shown, using the same
-	 * filtered list the grid renders. The single place a grid selection is made, so the
-	 * click path and the reveal-on-edit path cannot disagree about what is selected.
-	 */
-	private void selectGridIndex(int idx) {
-		String query = itemSearchField != null ? itemSearchField.getValue() : "";
-		List<ItemStack> items = ItemCatalog.filter(selectedTab, query);
-		if (idx < 0 || idx >= items.size()) {
-			selectedGridIndex = -1;
-			selectedItem = ItemStack.EMPTY;
-			return;
-		}
-		selectedGridIndex = idx;
-		selectedItem = items.get(idx).copy();
-	}
-
-	/** Scrolls the grid so {@code idx} is on the visible page, centred where possible. */
-	private void scrollGridTo(int idx) {
-		if (idx < 0) {
-			return;
-		}
-		int cols = Math.max(1, gridCols());
-		int rows = Math.max(1, gridRows());
-		int targetRow = idx / cols;
-		int total = ItemCatalog.filter(selectedTab, itemSearchField == null ? "" : itemSearchField.getValue()).size();
-		int maxScroll = Math.max(0, (total + cols - 1) / cols - rows);
-		pickerScroll = Mth.clamp(targetRow - rows / 2, 0, maxScroll);
-	}
-
-	/**
-	 * Reveals an item by typing it into the search box and selecting the single hit.
-	 * Far simpler than hunting for a tab index and a scroll offset: the catalog is flat
-	 * and huge, and the filter already finds items by name. Switching to "All Items"
-	 * first, because a filter only searches the tab currently shown and the item may
-	 * live in any of them.
-	 */
-	private void revealItem(Item item) {
-		if (item == null || item == Items.AIR || itemSearchField == null) {
-			return;
-		}
-		selectedTab = 0;
-		String name = new ItemStack(item).getHoverName().getString();
-		itemSearchField.setValue(name);
-		// The responder cleared the selection; pick whatever the filter left.
-		selectGridIndex(selectedGridIndex);
-		if (selectedGridIndex < 0) {
-			selectGridIndex(0);
-		}
-		scrollGridTo(Math.max(0, selectedGridIndex));
+	/** Closes the edit modal, leaving the selection alone. */
+	private void closeTaskEditDialog() {
+		editingTaskId = null;
+		assigneeDropdownOpen = false;
 	}
 
 	private boolean handleRightPaneClick(double mx, double my) {
@@ -1611,8 +1677,7 @@ public final class AdminQuestScreen extends Screen {
 
 		// Task rows
 		for (AdminSyncPayload.AdminTaskEntry task : quest.tasks()) {
-			int rowH = TASK_ROW_H;
-			if (my >= y && my < y + rowH) {
+			if (my >= y && my < y + TASK_ROW_H) {
 				// Delete [✕]
 				int delX = x + w - 8;
 				if (mx >= delX - 2 && mx <= delX + 8) {
@@ -1625,7 +1690,7 @@ public final class AdminQuestScreen extends Screen {
 					return true;
 				}
 
-				// Click to Edit Task
+				// Click to Edit Task — opens the modal; amount and assignee only.
 				startEditingTask(quest, task);
 				return true;
 			}
@@ -1644,30 +1709,108 @@ public final class AdminQuestScreen extends Screen {
 		return false;
 	}
 
-	private void executeTaskAction() {
-		if (selectedQuestId == null || selectedItem.isEmpty()) return;
+	/**
+	 * Modal clicks: pill, Save, Cancel, close. Geometry mirrors
+	 * {@link #renderTaskEditDialog} and must be kept in step with it.
+	 */
+	private boolean handleEditModalClick(net.minecraft.client.input.MouseButtonEvent event, double mx, double my) {
+		int modalX = editModalX();
+		int modalY = editModalY();
+
+		int closeX = modalX + EDIT_MODAL_W - 14;
+		int closeY = modalY + 6;
+		if (mx >= closeX - 2 && mx <= closeX + 10 && my >= closeY - 2 && my <= closeY + 10) {
+			closeTaskEditDialog();
+			return true;
+		}
+
+		// Assignee pill
+		int pillY = modalY + 45;
+		int pillX = modalX + 10 + font.width(AMOUNT_LABEL) + LABEL_GAP + AMOUNT_FIELD_W + 6;
+		int pillW = modalX + EDIT_MODAL_W - 10 - pillX;
+		if (mx >= pillX && mx <= pillX + pillW && my >= pillY && my <= pillY + 14) {
+			assigneeDropdownOpen = true;
+			assigneeDropdownX = pillX;
+			assigneeDropdownY = pillY;
+			return true;
+		}
+
+		int btnY = modalY + EDIT_MODAL_H - 22;
+		int saveW = font.width("Save") + 10;
+		int saveX = modalX + EDIT_MODAL_W - saveW - 10;
+		if (mx >= saveX && mx <= saveX + saveW && my >= btnY && my <= btnY + 16) {
+			commitTaskEdit();
+			return true;
+		}
+
+		int cancelW = font.width("Cancel") + 8;
+		int cancelX = saveX - cancelW - 6;
+		if (mx >= cancelX && mx <= cancelX + cancelW && my >= btnY && my <= btnY + 16) {
+			closeTaskEditDialog();
+			return true;
+		}
+
+		// Pass click through so the count field can take focus.
+		return super.mouseClicked(event, false);
+	}
+
+	/**
+	 * Commits the inline edit: amount and assignee only. The item is not read from the
+	 * picker, because an edit cannot change it.
+	 */
+	private void commitTaskEdit() {
+		if (selectedQuestId == null || editingTaskId == null) {
+			return;
+		}
+		if (!ClientPlayNetworking.canSend(AdminActionPayload.TYPE)) {
+			return;
+		}
+		AdminSyncPayload.AdminQuestEntry quest = selectedQuest();
+		if (quest == null) {
+			return;
+		}
+		String itemId = null;
+		for (AdminSyncPayload.AdminTaskEntry task : quest.tasks()) {
+			if (task.id().equals(editingTaskId)) {
+				itemId = task.itemId();
+				break;
+			}
+		}
+		if (itemId == null) {
+			return;
+		}
+		ClientPlayNetworking.send(AdminActionPayload.updateTask(selectedQuestId, editingTaskId,
+				new AdminActionPayload.NewTaskData(itemId, parseCount(), selectedAssigneeId)));
+		closeTaskEditDialog();
+	}
+
+	/** Count field as a bounded int; falls back to 1 on anything unparseable. */
+	private int parseCount() {
+		int count = 1;
+		if (countField != null) {
+			try {
+				count = Integer.parseInt(countField.getValue().trim());
+			} catch (NumberFormatException ignored) {
+				// Keep the default.
+			}
+		}
+		return Math.max(1, Math.min(1000000, count));
+	}
+
+	/** Commits a new task from the picker: item, amount and assignee. */
+	private void executeAddTask() {
+		if (selectedQuestId == null || selectedItem.isEmpty()) {
+			return;
+		}
 
 		Identifier id = BuiltInRegistries.ITEM.getKey(selectedItem.getItem());
-		if (id == null) return;
+		if (id == null) {
+			return;
+		}
 
-		int count = 1;
-		try {
-			count = Integer.parseInt(countField.getValue().trim());
-		} catch (NumberFormatException ignored) {}
-		count = Math.max(1, Math.min(1000000, count));
-
-		if (editingTaskId != null) {
-			// Update Existing Task
-			if (ClientPlayNetworking.canSend(AdminActionPayload.TYPE)) {
-				ClientPlayNetworking.send(AdminActionPayload.updateTask(selectedQuestId, editingTaskId,
-						new AdminActionPayload.NewTaskData(id.toString(), count, selectedAssigneeId)));
-			}
-		} else {
-			// Add New Task
-			if (ClientPlayNetworking.canSend(AdminActionPayload.TYPE)) {
-				ClientPlayNetworking.send(AdminActionPayload.addTask(selectedQuestId,
-						new AdminActionPayload.NewTaskData(id.toString(), count, selectedAssigneeId)));
-			}
+		if (ClientPlayNetworking.canSend(AdminActionPayload.TYPE)) {
+			ClientPlayNetworking.send(AdminActionPayload.addTask(selectedQuestId,
+					new AdminActionPayload.NewTaskData(id.toString(), parseCount(), selectedAssigneeId)));
 		}
 
 		closeItemPicker();
@@ -1690,9 +1833,15 @@ public final class AdminQuestScreen extends Screen {
 				return true;
 			}
 			if (editingTaskId != null) {
-				editingTaskId = null;
+				closeTaskEditDialog();
 				return true;
 			}
+		}
+
+		if (editingTaskId != null && !assigneeDropdownOpen
+				&& (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER)) {
+			commitTaskEdit();
+			return true;
 		}
 
 		if (newQuestDialogOpen && (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER)) {
@@ -1705,7 +1854,8 @@ public final class AdminQuestScreen extends Screen {
 
 	@Override
 	public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
-		if (newQuestDialogOpen) {
+		// A modal owns the screen; the panes behind it must not scroll under it.
+		if (newQuestDialogOpen || editingTaskId != null) {
 			return true;
 		}
 

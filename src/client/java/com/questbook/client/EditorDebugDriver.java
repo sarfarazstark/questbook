@@ -56,7 +56,7 @@ public final class EditorDebugDriver {
 	 */
 	private static int autoMode = -1;
 	/** Last step the auto run should force. */
-	private static final int AUTO_LAST = 6;
+	private static final int AUTO_LAST = 5;
 
 	private EditorDebugDriver() {
 	}
@@ -197,9 +197,6 @@ public final class EditorDebugDriver {
 			QuestBook.LOGGER.warn("Editor capture: no screen to step {}", step);
 			return;
 		}
-		// Any parked pointer belongs to the previous step only, so a hover state cannot
-		// leak its tooltip into the next shot.
-		current.debugClearHover();
 		QuestBook.LOGGER.info("Editor capture: forcing step {} ({})", step, current.debugState());
 		switch (step) {
 			case 1 -> current.debugSelectFirstQuest();
@@ -212,7 +209,6 @@ public final class EditorDebugDriver {
 				current.debugTypeSearch("dia");
 			}
 			case 5 -> current.debugOpenEditTask();
-			case 6 -> current.debugHoverTab(2);
 			default -> current.debugAdvanceFocus();
 		}
 	}

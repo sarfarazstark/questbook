@@ -232,7 +232,7 @@ public final class QuestCommands {
 		Quest quest = found.get();
 
 		data.setStore(data.store().updateTask(quest.id(), task.get().id(),
-				t -> t.withAssignee(player.getUUID())));
+				t -> t.withAssignee(player.getUUID(), player.getGameProfile().name())));
 		sync(ctx);
 		success(ctx, "Assigned to " + player.getGameProfile().name());
 
