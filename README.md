@@ -115,9 +115,9 @@ entry. `editor list` shows operators and grantees separately, so hidden OP acces
 is never mistaken for "nobody can edit".
 
 Revoking by **name** needs the player online. Revoking by **id** does not, which
-matters for the case where the grant outlived the last operator who could undo
-it — the console escape hatch. An 8-character UUID prefix resolves, so you do not
-have to transcribe a full UUID under pressure.
+matters for the case where the grant outlives the last operator who could undo
+it — the console escape hatch. The id accepts a full UUID or any hex prefix of
+one, so the short form `editor list` prints can be pasted straight back in.
 
 ## Rewards
 

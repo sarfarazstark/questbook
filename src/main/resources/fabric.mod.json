@@ -4,13 +4,8 @@
   "version": "${version}",
   "name": "Quest Book",
   "description": "Admins create quests and assign tasks to players. Progress tracks automatically.",
-  "authors": [
-    "sarfarazstark"
-  ],
-  "contact": {
-    "sources": "https://github.com/sarfarazstark/questbook",
-    "issues": "https://github.com/sarfarazstark/questbook/issues"
-  },
+  "authors": [],
+  "contact": {},
   "license": "MIT",
   "environment": "*",
   "entrypoints": {
