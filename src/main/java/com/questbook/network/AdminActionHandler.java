@@ -38,14 +38,14 @@ public final class AdminActionHandler {
 			return;
 		}
 
-		// Security: OP level 2 required for admin actions
-		if (!Commands.LEVEL_GAMEMASTERS.check(player.permissions())) {
-			QuestBook.LOGGER.warn("Non-OP player {} tried to perform admin action: {}", player.getGameProfile().name(), payload.action());
+		QuestSavedData data = Quests.find(server).orElse(null);
+		if (data == null) {
 			return;
 		}
 
-		QuestSavedData data = Quests.find(server).orElse(null);
-		if (data == null) {
+		if (!mayEdit(player, data)) {
+			QuestBook.LOGGER.warn("Player {} without editor access tried to perform admin action: {}",
+					player.getGameProfile().name(), payload.action());
 			return;
 		}
 
@@ -154,9 +154,22 @@ public final class AdminActionHandler {
 		syncAllAdmins(server, data);
 	}
 
+	/**
+	 * Whether {@code player} may edit quests: holds OP level 2, or was granted editor
+	 * access by one.
+	 *
+	 * <p>The single definition of "may edit". Every gate routes through here — the
+	 * action receiver, the admin sync fan-out and the commands — because three copies
+	 * of this rule is exactly how one of them ends up permissive by accident.
+	 */
+	public static boolean mayEdit(ServerPlayer player, QuestSavedData data) {
+		return Commands.LEVEL_GAMEMASTERS.check(player.permissions())
+				|| data.isEditor(player.getUUID());
+	}
+
 	public static void syncAllAdmins(MinecraftServer server, QuestSavedData data) {
 		for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-			if (Commands.LEVEL_GAMEMASTERS.check(player.permissions()) && ServerPlayNetworking.canSend(player, AdminSyncPayload.TYPE)) {
+			if (mayEdit(player, data) && ServerPlayNetworking.canSend(player, AdminSyncPayload.TYPE)) {
 				sendAdminSync(player, server, data);
 			}
 		}
@@ -203,7 +216,8 @@ public final class AdminActionHandler {
 			));
 		}
 
-		ServerPlayNetworking.send(player, new AdminSyncPayload(questEntries, onlinePlayers));
+		ServerPlayNetworking.send(player, new AdminSyncPayload(questEntries, onlinePlayers,
+				mayEdit(player, data)));
 	}
 
 	/**

@@ -33,6 +33,7 @@ public final class QuestModelCheck {
 		checkQuestOrderPreserved();
 		checkPlayerStats();
 		checkAssigneeNamePersists();
+		checkEditorAccess();
 		checkBackwardCompatibleDocument();
 
 		if (failures > 0) {
@@ -321,6 +322,56 @@ public final class QuestModelCheck {
 		Quest quest = Quest.create("Cottage").withTask(task);
 		Task loaded = QuestStore.EMPTY.withQuest(quest).quests().get(0).tasks().get(0);
 		expect("store keeps the assignee name", loaded.assigneeName().equals("Alex"));
+	}
+
+	/**
+	 * Editor grants survive the round trip, and revoking is exact.
+	 *
+	 * <p>An editor is the one thing here that widens who may write, so the set has to
+	 * persist across a restart: an in-memory set would silently revoke every grant on
+	 * the next world load and look like a bug in the command.
+	 */
+	private static void checkEditorAccess() {
+		UUID alex = UUID.randomUUID();
+		UUID sam = UUID.randomUUID();
+
+		QuestSavedData data = new QuestSavedData();
+
+		expect("nobody is an editor by default", !data.isEditor(alex));
+		expect("the default set is empty", data.editors().isEmpty());
+
+		data.addEditor(alex);
+		expect("a granted player is an editor", data.isEditor(alex));
+		expect("a different player is not", !data.isEditor(sam));
+		expect("the set holds the grant", data.editors().size() == 1);
+
+		// Granting twice must not duplicate, or the list output shows repeats.
+		data.addEditor(alex);
+		expect("granting twice does not duplicate", data.editors().size() == 1);
+
+		data.addEditor(sam);
+		expect("a second grant lands", data.editors().size() == 2);
+
+		// Revoking one must leave the other: an off-by-one here would either keep
+		// access for a revoked player or drop an unrelated grant.
+		data.removeEditor(alex);
+		expect("revoking removes that player", !data.isEditor(alex));
+		expect("revoking leaves the others", data.isEditor(sam));
+
+		data.removeEditor(alex);
+		expect("revoking twice is harmless", data.editors().size() == 1);
+
+		// The disk round trip is the point: this is what outlives a restart.
+		QuestSavedData reloaded = new QuestSavedData(data.toDocument());
+		expect("grants survive a reload", reloaded.isEditor(sam));
+		expect("revocations survive a reload", !reloaded.isEditor(alex));
+
+		// A malformed id must be skipped, not crash the world load.
+		QuestSavedData.Document dirty = new QuestSavedData.Document(List.of(), Map.of(),
+				List.of("not-a-uuid", sam.toString()));
+		QuestSavedData repaired = new QuestSavedData(dirty);
+		expect("a malformed editor id is ignored", repaired.editors().size() == 1);
+		expect("the valid grant beside it survives", repaired.isEditor(sam));
 	}
 
 	/**

@@ -64,6 +64,27 @@ public final class QuestText {
 		return msg;
 	}
 
+	/**
+	 * Told to a player who has just been granted editor access.
+	 *
+	 * <p>Names the key, because the grant is useless if the player never discovers the
+	 * editor exists — the screen is opened by a keybind, not by a command.
+	 */
+	public static Component editorGranted() {
+		MutableComponent msg = tag("Editor access", 0xFFA726);
+		msg.append(Component.literal("press ").withStyle(s -> s.withColor(0x9E9E9E)));
+		msg.append(Component.literal("K").withStyle(s -> s.withColor(0xFFEE58)));
+		msg.append(Component.literal(" to manage quests").withStyle(s -> s.withColor(0x9E9E9E)));
+		return msg;
+	}
+
+	/** Told to a player whose editor access has been taken away. */
+	public static Component editorRevoked() {
+		MutableComponent msg = tag("Editor access removed", 0xE57373);
+		msg.append(Component.literal("you can no longer manage quests").withStyle(s -> s.withColor(0xE0E0E0)));
+		return msg;
+	}
+
 	public static String displayName(String itemId) {
 		String path = itemId.contains(":") ? itemId.substring(itemId.indexOf(':') + 1) : itemId;
 		path = path.replace('_', ' ');

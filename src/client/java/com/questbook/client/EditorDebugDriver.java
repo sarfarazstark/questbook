@@ -108,9 +108,17 @@ public final class EditorDebugDriver {
 
 		// Count down to the auto run, then hand over to it.
 		if (startupDelay > 0 && --startupDelay == 0) {
-			// The player book is the screen with the reported layout bugs, so it is
-			// the default capture target. Set -Dquestbook.capture=editor for the other.
-			bookRun = !"editor".equals(System.getProperty("questbook.capture"));
+			// Opt-in only. The capture opens a screen and writes PNGs, which hijacks a
+			// session that just wanted to test the mod by hand — so it runs only when a
+			// mode was named explicitly: -Pquestbook.capture=book|editor.
+			String mode = System.getProperty("questbook.capture", "");
+
+			if (mode.isEmpty()) {
+				startupDelay = -1;
+				return;
+			}
+
+			bookRun = !"editor".equals(mode);
 			bookMode = 0;
 			autoMode = bookRun ? -1 : 0;
 			return;

@@ -10,6 +10,7 @@ import java.util.List;
 public final class ClientAdminState {
 	private static List<AdminSyncPayload.AdminQuestEntry> quests = List.of();
 	private static List<AdminSyncPayload.PlayerEntry> players = List.of();
+	private static boolean mayEdit = false;
 
 	private ClientAdminState() {
 	}
@@ -17,11 +18,13 @@ public final class ClientAdminState {
 	public static void apply(AdminSyncPayload payload) {
 		quests = List.copyOf(payload.quests());
 		players = List.copyOf(payload.players());
+		mayEdit = payload.mayEdit();
 	}
 
 	public static void clear() {
 		quests = List.of();
 		players = List.of();
+		mayEdit = false;
 	}
 
 	public static List<AdminSyncPayload.AdminQuestEntry> quests() {
@@ -30,6 +33,16 @@ public final class ClientAdminState {
 
 	public static List<AdminSyncPayload.PlayerEntry> players() {
 		return players;
+	}
+
+	/**
+	 * Whether the server considers this player able to edit quests.
+	 *
+	 * <p>Drives whether the editor opens at all. The server re-checks every action, so
+	 * this only decides whether to show a screen whose buttons would all be refused.
+	 */
+	public static boolean mayEdit() {
+		return mayEdit;
 	}
 
 	public static boolean isEmpty() {

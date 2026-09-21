@@ -62,16 +62,46 @@ public final class QuestKeybinds {
 
 		if (openAdmin != null) {
 			while (openAdmin.consumeClick()) {
-				if (!Commands.LEVEL_GAMEMASTERS.check(client.player.permissions())) {
-					continue; // Silently ignore for non-OP players
+				if (QuestBookScreen.isOpen() || AdminQuestScreen.isOpen()) {
+					continue;
 				}
-				if (!QuestBookScreen.isOpen() && !AdminQuestScreen.isOpen()) {
-					if (ClientPlayNetworking.canSend(AdminActionPayload.TYPE)) {
-						ClientPlayNetworking.send(AdminActionPayload.requestSync());
-					}
-					client.setScreenAndShow(new AdminQuestScreen());
+				if (!ClientPlayNetworking.canSend(AdminActionPayload.TYPE)) {
+					continue;
 				}
+
+				// Ask the server, rather than testing OP locally. An editor grant is
+				// server-side state the client cannot see, so a local OP check would
+				// lock out exactly the players this feature exists to allow.
+				ClientPlayNetworking.send(AdminActionPayload.requestSync());
+				pendingOpen = true;
+			}
+		}
+
+		// The reply decides whether the editor opens. One tick of latency, in exchange
+		// for the client never guessing at a permission it does not own.
+		//
+		// The wait is measured before checking the flag, so a reply that arrives on the
+		// first tick wins: testing the flag first would treat a same-tick arrival as
+		// "no reply" and close the window early.
+		if (pendingOpen) {
+			if (++syncSettled > SYNC_WAIT_TICKS) {
+				// The server never answered. Drop it silently rather than showing an
+				// editor whose every action would be refused.
+				pendingOpen = false;
+				syncSettled = 0;
+			} else if (ClientAdminState.mayEdit()) {
+				pendingOpen = false;
+				syncSettled = 0;
+				client.setScreenAndShow(new AdminQuestScreen());
 			}
 		}
 	}
+
+	/** Ticks to wait for the sync reply. Generous: a slow tick must not close the door. */
+	private static final int SYNC_WAIT_TICKS = 40;
+
+	/** Waiting for the sync reply that says whether this player may open the editor. */
+	private static boolean pendingOpen = false;
+	/** Ticks waited for that reply, so a silent server cannot leave it pending forever. */
+	private static int syncSettled = 0;
 }

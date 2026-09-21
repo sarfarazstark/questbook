@@ -105,7 +105,14 @@ public final class ProgressTracker {
 		// Push the new progress to the client. Without this the server's data is
 		// correct but the book keeps showing the last synced numbers, so a pickup
 		// appears to do nothing until some unrelated action triggers a re-sync.
-		QuestNetworking.syncAll(server);
+		//
+		// Only this player's payload changed: QuestSyncPayload.forPlayer filters to
+		// the recipient's own tasks, so nobody else's book contains this progress.
+		// Fanning out to the whole server here would mean every pickup rebuilt and
+		// sent a packet per online player, which is the one thing that must not
+		// happen on a busy server. Admins still get a refresh because their editor
+		// shows everyone's progress.
+		QuestNetworking.sync(player);
 		AdminActionHandler.syncAllAdmins(server, data);
 
 		for (int i = 0; i < completedNow.size(); i++) {
@@ -168,14 +175,6 @@ public final class ProgressTracker {
 		}
 
 		return id.toString();
-	}
-
-	/** Human-readable item name for chat, e.g. {@code minecraft:oak_log -> oak log}. */
-	private static String itemName(String itemId) {
-		String path = itemId.contains(":") ? itemId.substring(itemId.indexOf(':') + 1) : itemId;
-		path = path.replace('_', ' ');
-
-		return path.isEmpty() ? itemId : Character.toUpperCase(path.charAt(0)) + path.substring(1);
 	}
 
 }

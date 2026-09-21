@@ -12,8 +12,13 @@ import java.util.UUID;
 
 /**
  * Server to Admin Client: full quest tree and online player list.
+ *
+ * <p>{@code mayEdit} tells the client whether to offer the editor at all. The server
+ * enforces the same rule on every action regardless, so this is a convenience for the
+ * UI rather than a security boundary — a forged value still gets rejected.
  */
-public record AdminSyncPayload(List<AdminQuestEntry> quests, List<PlayerEntry> players) implements CustomPacketPayload {
+public record AdminSyncPayload(List<AdminQuestEntry> quests, List<PlayerEntry> players,
+		boolean mayEdit) implements CustomPacketPayload {
 	public static final Type<AdminSyncPayload> TYPE = new Type<>(QuestBook.id("admin_sync"));
 
 	public static final StreamCodec<FriendlyByteBuf, AdminSyncPayload> CODEC =
@@ -76,7 +81,8 @@ public record AdminSyncPayload(List<AdminQuestEntry> quests, List<PlayerEntry> p
 	public AdminSyncPayload(FriendlyByteBuf buf) {
 		this(
 				buf.readCollection(ArrayList::new, AdminQuestEntry::read),
-				buf.readCollection(ArrayList::new, PlayerEntry::read)
+				buf.readCollection(ArrayList::new, PlayerEntry::read),
+				buf.readBoolean()
 		);
 	}
 
@@ -88,5 +94,6 @@ public record AdminSyncPayload(List<AdminQuestEntry> quests, List<PlayerEntry> p
 	private void write(FriendlyByteBuf buf) {
 		buf.writeCollection(quests, (out, entry) -> entry.write(out));
 		buf.writeCollection(players, (out, entry) -> entry.write(out));
+		buf.writeBoolean(mayEdit);
 	}
 }
