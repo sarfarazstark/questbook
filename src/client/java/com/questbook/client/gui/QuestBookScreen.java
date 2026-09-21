@@ -135,6 +135,13 @@ public class QuestBookScreen extends Screen {
 
 	@Override
 	public void extractRenderState(GuiGraphicsExtractor g, int mouseX, int mouseY, float partialTick) {
+		// Debug capture only: a tooltip exists solely while hovering, so a shot cannot
+		// reproduce one without a parked pointer.
+		if (hoverX >= 0) {
+			mouseX = hoverX;
+			mouseY = hoverY;
+		}
+
 		// Blit the sprite's own region: u,v must be the sprite's offset in the
 		// file (20,1), not 0,0. Passing 0,0 samples the transparent margin, which
 		// shows an empty book and shifts the visible art.
@@ -142,13 +149,13 @@ public class QuestBookScreen extends Screen {
 				(float) SPRITE_X, (float) SPRITE_Y,
 				bookWidth, bookHeight, SPRITE_W, SPRITE_H, TEX_SIZE, TEX_SIZE);
 
-		drawContent(g);
+		drawContent(g, mouseX, mouseY);
 		drawClose(g, mouseX, mouseY);
 
 		super.extractRenderState(g, mouseX, mouseY, partialTick);
 	}
 
-	private void drawContent(GuiGraphicsExtractor g) {
+	private void drawContent(GuiGraphicsExtractor g, int mouseX, int mouseY) {
 		int total = ClientQuestState.totalTasks();
 
 		if (total == 0) {
@@ -164,7 +171,7 @@ public class QuestBookScreen extends Screen {
 			y = drawQuestHeader(g, quest, listTop, y);
 
 			for (QuestSyncPayload.TaskEntry task : quest.tasks()) {
-				y = drawTask(g, task, listTop, y);
+				y = drawTask(g, task, listTop, y, mouseX, mouseY);
 			}
 		}
 
@@ -234,7 +241,8 @@ public class QuestBookScreen extends Screen {
 	 *
 	 * @return the next y
 	 */
-	private int drawTask(GuiGraphicsExtractor g, QuestSyncPayload.TaskEntry task, int listTop, int y) {
+	private int drawTask(GuiGraphicsExtractor g, QuestSyncPayload.TaskEntry task, int listTop, int y,
+			int mouseX, int mouseY) {
 		if (y + LINE_HEIGHT > pageTop && y < pageBottom) {
 			// Pinned rows get their own marker, so the state is visible without
 			// opening the HUD.
@@ -243,12 +251,72 @@ public class QuestBookScreen extends Screen {
 			int labelColour = task.pinned() ? TEXT_PINNED
 					: task.complete() ? TEXT_DONE : TEXT;
 
-			g.text(font, marker + task.label(), pageLeft, y, labelColour, false);
+			// Two hover zones: the marker is a control, the rest of the row is text.
+			boolean overMarker = mouseX >= pageLeft - 2 && mouseX <= pageLeft + MARKER_WIDTH
+					&& mouseY >= y && mouseY < y + LINE_HEIGHT;
+			boolean overRow = !overMarker
+					&& mouseX > pageLeft + MARKER_WIDTH && mouseX <= textRight()
+					&& mouseY >= y && mouseY < y + LINE_HEIGHT;
+
+			if (overMarker || overRow) {
+				g.fill(pageLeft - 2, y - 1, textRight() + 2, y + LINE_HEIGHT - 1, HOVER_BAND);
+			}
+
+			// The label gets the column width minus whatever the count needs, measured
+			// from pageLeft.
+			int room = textRight() - pageLeft - font.width(count) - LABEL_GAP;
+			g.text(font, clamp(marker + task.label(), room), pageLeft, y, labelColour, false);
 			g.text(font, count, textRight() - font.width(count), y,
 					task.complete() ? TEXT_DONE : TEXT_DIM, false);
+
+			// Two tooltips, one line each.
+			//
+			// The marker's names the control. The row's shows the full name — which is
+			// the only place a clamped name is readable in full. Neither repeats the
+			// count: it is already in the right-hand column, and duplicating it was
+			// what made the box two lines tall and cover the list it described.
+			if (overMarker && !task.complete()) {
+				g.setTooltipForNextFrame(font,
+						Component.literal(task.pinned() ? "Unpin from HUD" : "Pin to HUD"), mouseX, mouseY);
+			} else if (overRow) {
+				g.setTooltipForNextFrame(font, Component.literal(task.label()), mouseX, mouseY);
+			}
 		}
 
 		return y + LINE_HEIGHT;
+	}
+
+	/** Row tint under the pointer. Warm, translucent, so the parchment shows through. */
+	private static final int HOVER_BAND = 0x2A8A5A00;
+
+	/** Space between a left label and the right-aligned value on the same row. */
+	private static final int LABEL_GAP = 6;
+
+	/**
+	 * Truncates to {@code width}, ending in an ellipsis when anything was dropped.
+	 *
+	 * <p>Measures and cuts with the same font, so the result always fits {@code width}.
+	 */
+	private String clamp(String text, int width) {
+		return clampPlain(text, width, false);
+	}
+
+	/**
+	 * As {@link #clamp}, optionally budgeting for bold glyphs.
+	 *
+	 * <p>Bold is roughly one pixel per character wider than plain. Measuring the plain
+	 * string and drawing the bold one therefore overflows by a character or two, which
+	 * is exactly the overlap this is meant to prevent — so a bold caller asks for the
+	 * allowance rather than being handed a wrong number.
+	 */
+	private String clampPlain(String text, int width, boolean bold) {
+		int budget = bold ? width - text.length() : width;
+
+		if (font.width(text) <= budget) {
+			return text;
+		}
+
+		return font.plainSubstrByWidth(text, Math.max(0, budget - font.width("\u2026"))) + "\u2026";
 	}
 
 	/**
@@ -265,7 +333,12 @@ public class QuestBookScreen extends Screen {
 					.filter(QuestSyncPayload.TaskEntry::complete).count();
 			String tally = done + "/" + quest.tasks().size();
 
-			g.text(font, bold(quest.name()), pageLeft, y, TEXT, false);
+			// Clamped so a long quest name cannot run under its own tally. Measured on
+			// the bold string, because bold glyphs are wider than the plain equivalent
+			// the clamp would otherwise budget for.
+			int room = textRight() - pageLeft - font.width(tally) - LABEL_GAP;
+			String shown = clampPlain(quest.name(), room, true);
+			g.text(font, bold(shown), pageLeft, y, TEXT, false);
 			g.text(font, tally, textRight() - font.width(tally), y, TEXT_DIM, false);
 		}
 
@@ -483,6 +556,65 @@ public class QuestBookScreen extends Screen {
 	public void onClose() {
 		open = false;
 		super.onClose();
+	}
+
+	// --- DEBUG HOOKS (development only; used by EditorDebugDriver) ----------
+
+	/**
+	 * Parked pointer for captures. Synthetic mouse input is discarded by the client,
+	 * so a hover-only surface such as a tooltip cannot be photographed any other way.
+	 * -1 means "use the real cursor".
+	 */
+	private int hoverX = -1;
+	private int hoverY = -1;
+
+	/** Rows drawn so far, so a hook can aim at one without duplicating the walk. */
+	private int debugFirstTaskY() {
+		int y = listTop() - (int) scroll;
+
+		for (QuestSyncPayload.QuestEntry quest : ClientQuestState.quests()) {
+			y += LINE_HEIGHT + QUEST_GAP;
+
+			if (!quest.tasks().isEmpty()) {
+				return y;
+			}
+		}
+
+		return -1;
+	}
+
+	/** Hovers the first task's label, exercising the row tooltip. */
+	public void debugHoverFirstTask() {
+		int y = debugFirstTaskY();
+
+		if (y >= 0) {
+			hoverX = pageLeft + MARKER_WIDTH + 4;
+			hoverY = y + 2;
+		}
+	}
+
+	/** Hovers the first task's marker, exercising the pin tooltip. */
+	public void debugHoverFirstMarker() {
+		int y = debugFirstTaskY();
+
+		if (y >= 0) {
+			hoverX = pageLeft + 2;
+			hoverY = y + 2;
+		}
+	}
+
+	public void debugClearHover() {
+		hoverX = -1;
+		hoverY = -1;
+	}
+
+	public String debugState() {
+		return "quests=" + ClientQuestState.quests().size()
+				+ " tasks=" + ClientQuestState.totalTasks()
+				+ " scale=" + scaleFor(width, height)
+				+ " page=" + pageLeft + "," + pageTop + ".." + pageRight + "," + pageBottom
+				+ " textRight=" + textRight()
+				+ " hover=" + hoverX + "," + hoverY;
 	}
 
 	@Override
