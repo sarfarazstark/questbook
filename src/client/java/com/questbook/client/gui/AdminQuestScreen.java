@@ -127,7 +127,24 @@ public final class AdminQuestScreen extends Screen {
 	private int assigneeDropdownX = 0;
 	private int assigneeDropdownY = 0;
 
-	// New Quest Dialog State (Modal)
+	/**
+	 * Copied verbatim by the dialog's [AI Prompt] button. Feed any existing task list
+	 * to an AI with this and it emits the JSON the import path accepts.
+	 */
+	private static final String IMPORT_PROMPT = """
+			Convert the task list at the end of this message into EXACTLY this JSON shape. Output JSON only, no prose, no markdown fences.
+
+			[{"name":"Quest name","tasks":[{"item":"oak_log","count":64,"player":"Alex"}]}]
+
+			Rules:
+			- One object per quest, all quests in one array.
+			- "item" is a minecraft item or block id, lowercase snake_case, namespace optional ("oak_log" is fine, "minecraft:oak_log" also works).
+			- "count" is the total required, integer.
+			- "player" is the assignee's name; omit the key entirely for unassigned.
+			- Omit "tasks" for an empty quest.
+
+			Task list:
+			""";
 	private boolean newQuestDialogOpen = false;
 	/** Dialog committed as a rename of the selected quest instead of a create. */
 	private boolean renameMode = false;
@@ -1236,6 +1253,13 @@ public final class AdminQuestScreen extends Screen {
 		boolean cancelHover = mouseX >= cancelBtnX && mouseX <= cancelBtnX + cancelBtnW && mouseY >= btnY && mouseY <= btnY + 16;
 		g.fill(cancelBtnX, btnY, cancelBtnX + cancelBtnW, btnY + 16, cancelHover ? BTN_SECONDARY_HOVER : BTN_SECONDARY);
 		g.text(font, "Cancel", cancelBtnX + 4, btnY + 4, TEXT_MUTED, false);
+
+		// [AI Prompt] — copies the converter prompt to the clipboard.
+		int aiW = font.width("AI Prompt") + 8;
+		int aiX = cancelBtnX - aiW - 6;
+		boolean aiHover = mouseX >= aiX && mouseX <= aiX + aiW && mouseY >= btnY && mouseY <= btnY + 16;
+		g.fill(aiX, btnY, aiX + aiW, btnY + 16, aiHover ? BTN_SECONDARY_HOVER : BTN_SECONDARY);
+		g.text(font, "AI Prompt", aiX + 4, btnY + 4, TEXT_MUTED, false);
 	}
 
 	// --- DROPDOWN OVERLAY ----------------------------------------------------
@@ -1436,6 +1460,14 @@ public final class AdminQuestScreen extends Screen {
 		int cancelBtnX = createBtnX - cancelBtnW - 6;
 		if (mx >= cancelBtnX && mx <= cancelBtnX + cancelBtnW && my >= btnY && my <= btnY + 16) {
 			closeNewQuestDialog();
+			return true;
+		}
+
+		// [AI Prompt]
+		int aiBtnW = font.width("AI Prompt") + 8;
+		int aiBtnX = cancelBtnX - aiBtnW - 6;
+		if (mx >= aiBtnX && mx <= aiBtnX + aiBtnW && my >= btnY && my <= btnY + 16) {
+			minecraft.keyboardHandler.setClipboard(IMPORT_PROMPT);
 			return true;
 		}
 
