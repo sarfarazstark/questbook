@@ -177,6 +177,36 @@ public final class ItemCatalog {
 		return TABS;
 	}
 
+	/**
+	 * Where an item sits in the catalog, so a screen can reveal it.
+	 *
+	 * <p>{@code index} is the flat position within that tab's unfiltered list, which
+	 * is what the grid's {@code selectedGridIndex} means when the search box is empty.
+	 */
+	public record Location(int tab, int index) {
+	}
+
+	/**
+	 * Finds the first tab whose unfiltered list contains {@code item}. Returns null for
+	 * an item the catalog does not carry (a modded item, say), which callers must treat
+	 * as "cannot be revealed" rather than as position zero.
+	 */
+	public static Location locate(Item item) {
+		init();
+		if (item == null || item == Items.AIR) {
+			return null;
+		}
+		for (int t = 0; t < TABS.size(); t++) {
+			List<ItemStack> items = TABS.get(t).items();
+			for (int i = 0; i < items.size(); i++) {
+				if (items.get(i).getItem() == item) {
+					return new Location(t, i);
+				}
+			}
+		}
+		return null;
+	}
+
 	public static List<ItemStack> filter(int tabIndex, String query) {
 		init();
 		if (TABS.isEmpty()) {

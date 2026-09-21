@@ -1,5 +1,6 @@
 package com.questbook.client.gui;
 
+import com.questbook.QuestBook;
 import com.questbook.client.ClientAdminState;
 import com.questbook.data.Reward;
 import com.questbook.data.Task;
@@ -188,8 +189,12 @@ public final class AdminQuestScreen extends Screen {
 		return Math.max(4, (height - pickerHeight()) / 2);
 	}
 
+	/** Header band, then a gap so the tab strip does not butt against its rule. */
+	private static final int PICKER_HEADER_H = 20;
+	private static final int PICKER_HEADER_GAP = 5;
+
 	private int pickerTabsY() {
-		return pickerTop() + 24;
+		return pickerTop() + PICKER_HEADER_H + PICKER_HEADER_GAP;
 	}
 
 	private int pickerSearchY() {
@@ -437,6 +442,12 @@ public final class AdminQuestScreen extends Screen {
 
 	@Override
 	public void extractRenderState(GuiGraphicsExtractor g, int mouseX, int mouseY, float partialTick) {
+		// Debug capture only: park the pointer so a shot can show a hover-only surface
+		// such as a tab tooltip, which no static state can reproduce.
+		if (hoverOverrideX >= 0) {
+			mouseX = hoverOverrideX;
+			mouseY = hoverOverrideY;
+		}
 		// A sync can arrive while this screen is open; keep the pane populated.
 		ensureSelection();
 
@@ -458,6 +469,13 @@ public final class AdminQuestScreen extends Screen {
 		if (itemSearchField != null) itemSearchField.visible = itemPickerOpen;
 		if (countField != null) countField.visible = itemPickerOpen;
 		if (newQuestNameField != null) newQuestNameField.visible = newQuestDialogOpen;
+
+		// After the widget tick, so the search responder's resets have already landed.
+		if (pendingReveal != null && itemPickerOpen) {
+			Item toReveal = pendingReveal;
+			pendingReveal = null;
+			revealItem(toReveal);
+		}
 
 		// Modal frames (rendered BEFORE widgets so their EditBoxes are drawn on top)
 		if (newQuestDialogOpen) {
@@ -599,8 +617,8 @@ public final class AdminQuestScreen extends Screen {
 		String label = font.plainSubstrByWidth(task.label() + " x" + task.need(), w - 66);
 		g.text(font, label, x + 12, y + 3, isTaskEditing ? TEXT_GOLD : (task.complete() ? TEXT_MUTED : TEXT_WHITE), false);
 
-		// Assignee Chip
-		String assignee = task.assigneeName();
+		// Assignee Chip — same UUID-stub handling as the picker pill.
+		String assignee = resolveTaskAssigneeLabel(task);
 		int assignW = Math.min(font.width(assignee) + 4, 40);
 		int assignX = x + w - assignW - 12;
 		g.fill(assignX, y + 2, assignX + assignW, y + rowH - 2, 0x40000000);
@@ -769,19 +787,22 @@ public final class AdminQuestScreen extends Screen {
 		// Frame
 		g.fill(left - 1, top - 1, left + pickerWidth() + 1, bottom + 1, 0xFF000000);
 		g.fill(left, top, left + pickerWidth(), bottom, PANEL_BG);
-		g.fill(left, top, left + pickerWidth(), top + 20, HEADER_BG);
-		g.fill(left, top + 20, left + pickerWidth(), top + 21, CARD_SELECTED_BORDER);
+		g.fill(left, top, left + pickerWidth(), top + PICKER_HEADER_H, HEADER_BG);
+		g.fill(left, top + PICKER_HEADER_H, left + pickerWidth(), top + PICKER_HEADER_H + 1, CARD_SELECTED_BORDER);
 
-		// Header
+		// Header — title, then the selected item right beside it, then close top-right.
+		// Sharing the title's line means no second header row and nothing to collide
+		// with the tab strip below.
 		boolean isEditing = editingTaskId != null;
-		g.text(font, isEditing ? "Edit Task Item" : "Select Item", gridLeft(), top + 6, TEXT_GOLD, false);
+		String title = isEditing ? "Edit Task Item" : "Select Item";
+		g.text(font, title, gridLeft(), top + 6, TEXT_GOLD, false);
 
-		// Selected item + quest context
-		String context = "Quest: " + (selectedQuest() != null ? selectedQuest().name() : "?");
-		g.text(font, font.plainSubstrByWidth(context, gridWidth()), gridLeft(), top + 24, TEXT_MUTED, false);
 		if (!selectedItem.isEmpty()) {
-			String sel = "Selected: " + selectedItem.getHoverName().getString();
-			g.text(font, font.plainSubstrByWidth(sel, gridWidth()), gridLeft(), pickerTabsY() - 10, TEXT_GREEN, false);
+			String sel = selectedItem.getHoverName().getString();
+			int selX = gridLeft() + font.width(title) + 8;
+			int closeX = gridLeft() + gridWidth() - 8;
+			int selClipW = Math.max(0, closeX - 6 - selX);
+			g.text(font, font.plainSubstrByWidth(sel, selClipW), selX, top + 6, TEXT_GREEN, false);
 		}
 
 		// [✕] Close
@@ -805,7 +826,9 @@ public final class AdminQuestScreen extends Screen {
 			}
 			g.item(tab.icon(), tabX + 1, tabY + 1);
 			if (hover) {
-				g.setTooltipForNextFrame(font, tab.icon(), mouseX, mouseY);
+				// The tab's own name. Passing the icon stack here showed that stack's
+				// hover tooltip — the item's name — which is not what the tab means.
+				g.setTooltipForNextFrame(font, tab.name(), mouseX, mouseY);
 			}
 			tabX += tabSize;
 		}
@@ -857,30 +880,36 @@ public final class AdminQuestScreen extends Screen {
 			g.setTooltipForNextFrame(font, hoveredStack, mouseX, mouseY);
 		}
 
-		// Single footer row: Amount field, assignee pill, Add-Update (+ Cancel).
+		// Footer row geometry. Render and hit-test both read these, because the two
+		// used to be written out separately and drifted.
 		int bottomY = pickerBottomY();
 		int rowH = 14;
 		g.text(font, AMOUNT_LABEL, gridLeft(), bottomY + 3, TEXT_WHITE, false);
-
-		// Clearance, not just the glyph width: EditBox pads its text by ~4px inside its
-		// outline, so the outline's left border must start well clear of the label or
-		// it slices through the final glyph.
 		int countX = amountFieldX();
 		int countW = AMOUNT_FIELD_W;
 		int assignBtnX = countX + countW + 6;
 
-		// Add-Update sits flush on the grid's right edge; the pill fills the space left
-		// of it, so the row shares the grid's left and right edges instead of stranding
-		// a gap before the scrollbar.
 		String actionLabel = isEditing ? "\u2713 Update Task" : "+ Add Task";
 		int addBtnW = font.width(actionLabel) + 10;
 		int addBtnX = gridRight() - addBtnW;
-		int assignBtnW = addBtnX - 6 - assignBtnX;
-		boolean assignHover = mouseX >= assignBtnX && mouseX <= assignBtnX + assignBtnW && mouseY >= bottomY && mouseY <= bottomY + rowH;
-		g.fill(assignBtnX, bottomY, assignBtnX + assignBtnW, bottomY + rowH, assignHover ? BTN_SECONDARY_HOVER : BTN_SECONDARY);
-		String assignText = "\u25BE " + font.plainSubstrByWidth(selectedAssigneeName, assignBtnW - 12);
-		int assignColor = selectedAssigneeId.equals(Task.UNASSIGNED) ? TEXT_RED : TEXT_GREEN;
-		g.text(font, assignText, assignBtnX + 4, bottomY + 3, assignColor, false);
+		// Cancel takes its width out of the row first; the pill gets what's left. It is
+		// drawn only if its label actually fits — a clipped "Offline p" reads worse than
+		// no pill, and the assignee is still visible in the task row.
+		int cancelBtnW = isEditing ? font.width("Cancel") + 8 : 0;
+		int cancelBtnX = isEditing ? addBtnX - cancelBtnW - 4 : addBtnX;
+		int assignBtnW = cancelBtnX - 6 - assignBtnX;
+		String assignLabel = resolveAssigneeLabel();
+		boolean showAssign = assignBtnW >= font.width("\u25BE " + assignLabel) + 10;
+
+		if (showAssign) {
+			boolean assignHover = mouseX >= assignBtnX && mouseX <= assignBtnX + assignBtnW && mouseY >= bottomY && mouseY <= bottomY + rowH;
+			g.fill(assignBtnX, bottomY, assignBtnX + assignBtnW, bottomY + rowH, assignHover ? BTN_SECONDARY_HOVER : BTN_SECONDARY);
+			// Label from the live player list when the id is still online. The server's
+			// fallback is a truncated UUID so a task never loses its attribution, but a
+			// UUID fragment is not something to offer as the current assignee.
+			int assignColor = selectedAssigneeId.equals(Task.UNASSIGNED) ? TEXT_RED : TEXT_GREEN;
+			g.text(font, "\u25BE " + assignLabel, assignBtnX + 4, bottomY + 3, assignColor, false);
+		}
 
 		boolean canAct = selectedQuestId != null && !selectedItem.isEmpty();
 		boolean actHover = mouseX >= addBtnX && mouseX <= addBtnX + addBtnW && mouseY >= bottomY && mouseY <= bottomY + rowH;
@@ -888,12 +917,46 @@ public final class AdminQuestScreen extends Screen {
 		g.text(font, actionLabel, addBtnX + 5, bottomY + 3, canAct ? TEXT_WHITE : TEXT_DIM, false);
 
 		if (isEditing) {
-			int cancelBtnW = font.width("Cancel") + 8;
-			int cancelBtnX = addBtnX - cancelBtnW - 4;
 			boolean cancelHover = mouseX >= cancelBtnX && mouseX <= cancelBtnX + cancelBtnW && mouseY >= bottomY && mouseY <= bottomY + rowH;
 			g.fill(cancelBtnX, bottomY, cancelBtnX + cancelBtnW, bottomY + rowH, cancelHover ? BTN_SECONDARY_HOVER : BTN_SECONDARY);
 			g.text(font, "Cancel", cancelBtnX + 4, bottomY + 3, TEXT_MUTED, false);
 		}
+	}
+
+	/** True when a resolved name is really the server's truncated-UUID fallback. */
+	private static boolean isUuidStub(UUID id, String name) {
+		return name != null && name.length() == 8 && name.equals(id.toString().substring(0, 8));
+	}
+
+	/** Assignee label for a task row: live name, else a human label, never a UUID. */
+	private String resolveTaskAssigneeLabel(AdminSyncPayload.AdminTaskEntry task) {
+		if (task.assignee().equals(Task.UNASSIGNED)) {
+			return "Unassigned";
+		}
+		for (AdminSyncPayload.PlayerEntry p : ClientAdminState.players()) {
+			if (p.id().equals(task.assignee())) {
+				return p.name();
+			}
+		}
+		return isUuidStub(task.assignee(), task.assigneeName()) ? "Offline player" : task.assigneeName();
+	}
+
+	/**
+	 * Name to show on the assignee pill. Prefers the server's resolved name, but that
+	 * degrades to a truncated UUID for an assignee who is offline, which reads as
+	 * corruption in the UI. In that case fall back to the online-player cache, and to
+	 * a plain label if they are gone entirely.
+	 */
+	private String resolveAssigneeLabel() {
+		if (selectedAssigneeId.equals(Task.UNASSIGNED)) {
+			return "Unassigned";
+		}
+		for (AdminSyncPayload.PlayerEntry p : ClientAdminState.players()) {
+			if (p.id().equals(selectedAssigneeId)) {
+				return p.name();
+			}
+		}
+		return isUuidStub(selectedAssigneeId, selectedAssigneeName) ? "Offline player" : selectedAssigneeName;
 	}
 
 	private void openItemPicker() {
@@ -972,8 +1035,7 @@ public final class AdminQuestScreen extends Screen {
 				int sy = gridTop + row * slotSize();
 				if (mx >= sx && mx < sx + slotSize() && my >= sy && my < sy + slotSize()) {
 					if (idx < items.size()) {
-						selectedGridIndex = idx;
-						selectedItem = items.get(idx).copy();
+						selectGridIndex(idx);
 					}
 					return true;
 				}
@@ -993,8 +1055,11 @@ public final class AdminQuestScreen extends Screen {
 		String actionLabel = isEditing ? "\u2713 Update Task" : "+ Add Task";
 		int addBtnW = font.width(actionLabel) + 10;
 		int addBtnX = gridRight() - addBtnW;
-		int assignBtnW = addBtnX - 6 - assignBtnX;
-		if (mx >= assignBtnX && mx <= assignBtnX + assignBtnW && my >= bottomY && my <= bottomY + rowH) {
+		int cancelBtnW = isEditing ? font.width("Cancel") + 8 : 0;
+		int cancelBtnX = isEditing ? addBtnX - cancelBtnW - 4 : addBtnX;
+		int assignBtnW = cancelBtnX - 6 - assignBtnX;
+		if (assignBtnW >= font.width("\u25BE " + resolveAssigneeLabel()) + 10
+				&& mx >= assignBtnX && mx <= assignBtnX + assignBtnW && my >= bottomY && my <= bottomY + rowH) {
 			assigneeDropdownOpen = true;
 			assigneeDropdownX = assignBtnX;
 			assigneeDropdownY = bottomY;
@@ -1007,8 +1072,6 @@ public final class AdminQuestScreen extends Screen {
 		}
 
 		if (isEditing) {
-			int cancelBtnW = font.width("Cancel") + 8;
-			int cancelBtnX = addBtnX - cancelBtnW - 4;
 			if (mx >= cancelBtnX && mx <= cancelBtnX + cancelBtnW && my >= bottomY && my <= bottomY + rowH) {
 				closeItemPicker();
 				return true;
@@ -1265,17 +1328,54 @@ public final class AdminQuestScreen extends Screen {
 		openItemPicker();
 	}
 
-	/**
-	 * Puts text in the picker's search field so a capture can photograph the value
+	/** Puts text in the picker's search field so a capture can photograph the value
 	 * path. The placeholder is only half the story: the value is drawn by EditBox
-	 * itself, from a different origin, so it needs its own shot.
-	 */
+	 * itself, from a different origin, so it needs its own shot. */
 	public void debugTypeSearch(String text) {
 		if (itemSearchField != null) {
 			itemSearchField.setValue(text);
 		}
 	}
 
+	/**
+	 * Opens the picker in its edit-task form: title "Edit Task Item", a selected item
+	 * and an assigned player. That is the state with the assignee pill, the Cancel
+	 * button and the widest header, none of which the other shots exercise.
+	 */
+	public void debugOpenEditTask() {
+		AdminSyncPayload.AdminQuestEntry quest = selectedQuest();
+		if (quest == null) {
+			QuestBook.LOGGER.warn("Editor debug: no quest selected for edit-task state");
+			return;
+		}
+		if (quest.tasks().isEmpty()) {
+			QuestBook.LOGGER.warn("Editor debug: quest '{}' has no tasks to edit", quest.name());
+			return;
+		}
+		startEditingTask(quest, quest.tasks().get(0));
+	}
+
+	/**
+	 * Opens the picker with the mouse parked on a category tab, so the capture shows
+	 * the tab's tooltip. A tooltip only exists while hovering, so no other shot can
+	 * prove what it says. {@link #debugClearHover()} must follow, or the pointer stays
+	 * parked and the tooltip never goes away.
+	 */
+	public void debugHoverTab(int index) {
+		debugOpenPicker();
+		hoverOverrideX = gridLeft() + index * slotSize() + slotSize() / 2;
+		hoverOverrideY = pickerTabsY() + slotSize() / 2;
+	}
+
+	/** Releases the parked pointer so hover surfaces disappear again. */
+	public void debugClearHover() {
+		hoverOverrideX = -1;
+		hoverOverrideY = -1;
+	}
+
+	/** Parks the rendered mouse position; -1 disables. Set by debug hooks for shots. */
+	private int hoverOverrideX = -1;
+	private int hoverOverrideY = -1;
 	/** Value drawn in the search field, so a capture can assert it is where it looks. */
 	public String debugSearchValue() {
 		return itemSearchField == null ? "<null>" : itemSearchField.getValue();
@@ -1298,6 +1398,28 @@ public final class AdminQuestScreen extends Screen {
 	public String debugState() {
 		return "selected=" + (selectedQuestId != null) + " picker=" + itemPickerOpen
 				+ " dialog=" + newQuestDialogOpen + " editing=" + (editingTaskId != null);
+	}
+
+	/**
+	 * Grid selection state. The shot alone cannot say whether a slot is unhighlighted
+	 * because the index is wrong or because the item is off the visible page, and those
+	 * need opposite fixes.
+	 */
+	public String debugGridState() {
+		ItemStack sel = selectedItem;
+		List<ItemStack> items = ItemCatalog.filter(selectedTab, itemSearchField == null ? "" : itemSearchField.getValue());
+		int idx = selectedGridIndex;
+		int cols = Math.max(1, gridCols());
+		int rows = gridRows();
+		int start = (int) pickerScroll * cols;
+		boolean visible = idx >= start && idx < start + cols * rows;
+		String at = idx >= 0 && idx < items.size()
+				? String.valueOf(BuiltInRegistries.ITEM.getKey(items.get(idx).getItem()))
+				: "<out of range>";
+		return "tab=" + selectedTab + " index=" + idx + " firstVisible=" + start
+				+ " visible=" + visible + " size=" + items.size()
+				+ " itemAt(index)=" + at
+				+ " selectedItem=" + (sel.isEmpty() ? "<empty>" : sel.getHoverName().getString());
 	}
 
 	/** One-line geometry summary, for when a shot needs explaining. */
@@ -1400,21 +1522,76 @@ public final class AdminQuestScreen extends Screen {
 		selectedQuestId = quest.id();
 		editingTaskId = task.id();
 
-		// Load item into picker
-		Identifier id = Identifier.tryParse(task.itemId());
-		Item item = id != null ? BuiltInRegistries.ITEM.getValue(id) : Items.AIR;
-		if (item != null && item != Items.AIR) {
-			selectedItem = new ItemStack(item);
-		}
+		selectedAssigneeId = task.assignee();
+		selectedAssigneeName = task.assigneeName();
 
 		if (countField != null) {
 			countField.setValue(String.valueOf(task.need()));
 		}
 
-		selectedAssigneeId = task.assignee();
-		selectedAssigneeName = task.assigneeName();
-
+		// Open first: openItemPicker() resets pickerScroll, so any scroll set before it
+		// is discarded and the edited item stays below the fold. All reveal work below.
 		openItemPicker();
+
+		// Deferred by one tick: the search field's responder resets the selection during
+		// the next widget tick, so anything set inline here is wiped a frame later.
+		Identifier taskItemId = Identifier.tryParse(task.itemId());
+		pendingReveal = taskItemId != null ? BuiltInRegistries.ITEM.getValue(taskItemId) : null;
+	}
+
+	/** Item to reveal once the picker's own resets have run; see {@link #revealItem}. */
+	private Item pendingReveal;
+
+	/**
+	 * Selects the grid slot at {@code idx} in the tab currently shown, using the same
+	 * filtered list the grid renders. The single place a grid selection is made, so the
+	 * click path and the reveal-on-edit path cannot disagree about what is selected.
+	 */
+	private void selectGridIndex(int idx) {
+		String query = itemSearchField != null ? itemSearchField.getValue() : "";
+		List<ItemStack> items = ItemCatalog.filter(selectedTab, query);
+		if (idx < 0 || idx >= items.size()) {
+			selectedGridIndex = -1;
+			selectedItem = ItemStack.EMPTY;
+			return;
+		}
+		selectedGridIndex = idx;
+		selectedItem = items.get(idx).copy();
+	}
+
+	/** Scrolls the grid so {@code idx} is on the visible page, centred where possible. */
+	private void scrollGridTo(int idx) {
+		if (idx < 0) {
+			return;
+		}
+		int cols = Math.max(1, gridCols());
+		int rows = Math.max(1, gridRows());
+		int targetRow = idx / cols;
+		int total = ItemCatalog.filter(selectedTab, itemSearchField == null ? "" : itemSearchField.getValue()).size();
+		int maxScroll = Math.max(0, (total + cols - 1) / cols - rows);
+		pickerScroll = Mth.clamp(targetRow - rows / 2, 0, maxScroll);
+	}
+
+	/**
+	 * Reveals an item by typing it into the search box and selecting the single hit.
+	 * Far simpler than hunting for a tab index and a scroll offset: the catalog is flat
+	 * and huge, and the filter already finds items by name. Switching to "All Items"
+	 * first, because a filter only searches the tab currently shown and the item may
+	 * live in any of them.
+	 */
+	private void revealItem(Item item) {
+		if (item == null || item == Items.AIR || itemSearchField == null) {
+			return;
+		}
+		selectedTab = 0;
+		String name = new ItemStack(item).getHoverName().getString();
+		itemSearchField.setValue(name);
+		// The responder cleared the selection; pick whatever the filter left.
+		selectGridIndex(selectedGridIndex);
+		if (selectedGridIndex < 0) {
+			selectGridIndex(0);
+		}
+		scrollGridTo(Math.max(0, selectedGridIndex));
 	}
 
 	private boolean handleRightPaneClick(double mx, double my) {

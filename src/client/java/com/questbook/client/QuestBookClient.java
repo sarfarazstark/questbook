@@ -46,5 +46,6 @@ public class QuestBookClient implements ClientModInitializer {
 				QuestHud::render);
 
 		QuestKeybinds.register();
+		EditorDebugDriver.register();
 	}
 }

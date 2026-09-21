@@ -1,5 +1,8 @@
 {
   "key.questbook.open_book": "Open Quest Book",
   "key.questbook.open_admin": "Open Admin Quest Editor",
-  "key.categories.questbook.main": "Quest Book"
+  "key.questbook.debug_shot": "[Debug] Editor: open and screenshot",
+  "key.questbook.debug_next": "[Debug] Editor: next state and screenshot",
+  "key.categories.questbook.main": "Quest Book",
+  "key.categories.questbook.debug": "Quest Book (debug)"
 }
