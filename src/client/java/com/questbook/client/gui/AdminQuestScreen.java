@@ -556,6 +556,14 @@ public final class AdminQuestScreen extends Screen {
 	g.fill(newBtnX, newBtnY, newBtnX + newBtnW, newBtnY + newBtnH, !canAdd ? 0xFF3E3E42 : (newHover ? BTN_PRIMARY_HOVER : BTN_PRIMARY));
 	g.text(font, "+ Add Task", newBtnX + 4, newBtnY + 3, canAdd ? TEXT_WHITE : TEXT_DIM, false);
 
+		// [AI Prompt] — copies the import-converter prompt. Feedback lives on the timer.
+		int aiW = font.width(aiCopiedTicks > 0 ? "Copied!" : "AI Prompt") + 8;
+		int aiX = newBtnX - aiW - 6;
+		int aiY = panelTop + 4;
+		boolean aiHover = !modalOpen() && mouseX >= aiX && mouseX <= aiX + aiW && mouseY >= aiY && mouseY <= aiY + newBtnH;
+		g.fill(aiX, aiY, aiX + aiW, aiY + newBtnH, aiHover ? BTN_SECONDARY_HOVER : BTN_SECONDARY);
+		g.text(font, aiCopiedTicks > 0 ? "Copied!" : "AI Prompt", aiX + 4, aiY + 3, aiCopiedTicks > 0 ? TEXT_GREEN : TEXT_WHITE, false);
+
 		// [✕] Close Button
 		int closeX = panelLeft + panelWidth - 14;
 		int closeY = panelTop + 6;
@@ -676,8 +684,8 @@ public final class AdminQuestScreen extends Screen {
 		int statusColor = task.complete() ? TEXT_GREEN : TEXT_DIM;
 		g.text(font, statusIcon, x + 3, y + 3, statusColor, false);
 
-		// Assignee Chip — same UUID-stub handling as the picker pill. Laid out first:
-		// the label clamps against it so a long item name can never run underneath.
+		// Assignee Chip — same UUID-stub handling as the picker pill. Right cluster
+		// first (chip, amount), so the name clamps against them and stays visible.
 		String assignee = resolveTaskAssigneeLabel(task);
 		int assignW = Math.min(font.width(assignee) + 4, 40);
 		int assignX = x + w - assignW - 12;
@@ -685,10 +693,14 @@ public final class AdminQuestScreen extends Screen {
 		int nameColor = task.assignee().equals(Task.UNASSIGNED) ? TEXT_RED : TEXT_CYAN;
 		g.text(font, font.plainSubstrByWidth(assignee, assignW - 2), assignX + 2, y + 3, nameColor, false);
 
-		// Label & Count — clamped to stop before the chip.
-		String countSuffix = " x" + task.need();
-		int labelMax = Math.max(8, assignX - 6 - (x + 12) - font.width(countSuffix));
-		String label = font.plainSubstrByWidth(task.label(), labelMax) + countSuffix;
+		// Amount, right-aligned just left of the chip.
+		String amountStr = "x" + task.need();
+		int amountX = assignX - 6 - font.width(amountStr);
+		g.text(font, amountStr, amountX, y + 3, task.complete() ? TEXT_MUTED : TEXT_WHITE, false);
+
+		// Name, clamped to the space between the status icon and the amount.
+		int nameMax = Math.max(8, amountX - 6 - (x + 12));
+		String label = font.plainSubstrByWidth(task.label(), nameMax);
 		g.text(font, label, x + 12, y + 3, isTaskEditing ? TEXT_GOLD : (task.complete() ? TEXT_MUTED : TEXT_WHITE), false);
 
 		// Delete [✕] — TEXT_MUTED, not TEXT_DIM. Measured against this row's own
@@ -1257,14 +1269,6 @@ public final class AdminQuestScreen extends Screen {
 		boolean cancelHover = mouseX >= cancelBtnX && mouseX <= cancelBtnX + cancelBtnW && mouseY >= btnY && mouseY <= btnY + 16;
 		g.fill(cancelBtnX, btnY, cancelBtnX + cancelBtnW, btnY + 16, cancelHover ? BTN_SECONDARY_HOVER : BTN_SECONDARY);
 		g.text(font, "Cancel", cancelBtnX + 4, btnY + 4, TEXT_MUTED, false);
-
-		// [AI Prompt] — copies the converter prompt to the clipboard.
-		String aiLabel = aiCopiedTicks > 0 ? "Copied!" : "AI Prompt";
-		int aiW = font.width(aiLabel) + 8;
-		int aiX = cancelBtnX - aiW - 6;
-		boolean aiHover = mouseX >= aiX && mouseX <= aiX + aiW && mouseY >= btnY && mouseY <= btnY + 16;
-		g.fill(aiX, btnY, aiX + aiW, btnY + 16, aiHover ? BTN_SECONDARY_HOVER : BTN_SECONDARY);
-		g.text(font, aiLabel, aiX + 4, btnY + 4, aiCopiedTicks > 0 ? TEXT_GREEN : TEXT_MUTED, false);
 	}
 
 	// --- DROPDOWN OVERLAY ----------------------------------------------------
@@ -1389,6 +1393,15 @@ public final class AdminQuestScreen extends Screen {
 			return true;
 		}
 
+		// [AI Prompt] — same geometry as the render path.
+		int aiW = font.width(aiCopiedTicks > 0 ? "Copied!" : "AI Prompt") + 8;
+		int aiX = newBtnX - aiW - 6;
+		if (!modalOpen() && mx >= aiX && mx <= aiX + aiW && my >= newBtnY && my <= newBtnY + newBtnH) {
+			minecraft.keyboardHandler.setClipboard(IMPORT_PROMPT);
+			aiCopiedTicks = 40;
+			return true;
+		}
+
 		// Left Pane Click
 		if (mx >= leftPaneLeft && mx <= leftPaneLeft + leftPaneWidth && my >= leftPaneTop && my <= leftPaneTop + leftPaneHeight) {
 			if (handleLeftPaneClick(mx, my)) {
@@ -1465,15 +1478,6 @@ public final class AdminQuestScreen extends Screen {
 		int cancelBtnX = createBtnX - cancelBtnW - 6;
 		if (mx >= cancelBtnX && mx <= cancelBtnX + cancelBtnW && my >= btnY && my <= btnY + 16) {
 			closeNewQuestDialog();
-			return true;
-		}
-
-		// [AI Prompt]
-		int aiBtnW = font.width(aiCopiedTicks > 0 ? "Copied!" : "AI Prompt") + 8;
-		int aiBtnX = cancelBtnX - aiBtnW - 6;
-		if (mx >= aiBtnX && mx <= aiBtnX + aiBtnW && my >= btnY && my <= btnY + 16) {
-			minecraft.keyboardHandler.setClipboard(IMPORT_PROMPT);
-			aiCopiedTicks = 40;
 			return true;
 		}
 
