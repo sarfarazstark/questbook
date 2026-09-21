@@ -52,8 +52,13 @@ public class QuestBookScreen extends Screen {
 	/** Text metrics. Vanilla's page style is black with no shadow. */
 	private static final int LINE_HEIGHT = 10;
 
-	/** The close glyph. A real X, since Minecraft's font has no U+2716. */
-	private static final String CLOSE_GLYPH = "x";
+	/**
+	 * The close glyph, matching the editor's close and delete crosses.
+	 *
+	 * <p>Kept as its own constant rather than shared with the editor: this one is
+	 * magnified via the pose matrix, so its hit-box is computed from its own metrics.
+	 */
+	private static final String CLOSE_GLYPH = "\u2715";
 
 	/** Leather brown, from the book's own border band. */
 	private static final int LEATHER = 0xFF652816;
@@ -156,9 +161,11 @@ public class QuestBookScreen extends Screen {
 	}
 
 	private void drawContent(GuiGraphicsExtractor g, int mouseX, int mouseY) {
-		int total = ClientQuestState.totalTasks();
+		List<QuestSyncPayload.QuestEntry> open = ClientQuestState.openQuests();
 
-		if (total == 0) {
+		if (open.isEmpty()) {
+			// Everything assigned is done, or nothing was ever assigned. Either way
+			// there is no list to draw, and the empty state says so.
 			drawEmptyState(g);
 			contentHeight = 0;
 			return;
@@ -167,7 +174,7 @@ public class QuestBookScreen extends Screen {
 		int listTop = listTop();
 		int y = listTop - (int) scroll;
 
-		for (QuestSyncPayload.QuestEntry quest : ClientQuestState.quests()) {
+		for (QuestSyncPayload.QuestEntry quest : open) {
 			y = drawQuestHeader(g, quest, listTop, y);
 
 			for (QuestSyncPayload.TaskEntry task : quest.tasks()) {
@@ -179,18 +186,23 @@ public class QuestBookScreen extends Screen {
 		// redrawn on top. Without the mask a scrolled row slides through the
 		// "My Tasks" line and the two overlap.
 		drawHeaderMask(g);
-		drawHeader(g, total);
+		drawHeader(g);
 		drawScrollbar(g, listTop);
 
 		contentHeight = (y + (int) scroll) - listTop;
 	}
 
-	/** The fixed header line: title on the left, completion tally on the right. */
-	private void drawHeader(GuiGraphicsExtractor g, int total) {
+	/**
+	 * The fixed header line: title on the left, remaining count on the right.
+	 *
+	 * <p>Shows what is left, not what is done. The list below only contains open work
+	 * now, so a done/total tally would disagree with every row a player can see.
+	 */
+	private void drawHeader(GuiGraphicsExtractor g) {
 		g.text(font, "My Tasks", pageLeft, pageTop, TEXT, false);
 
 		// The tally sits left of the close glyph, which owns the page's top-right.
-		String tally = ClientQuestState.completedTasks() + "/" + total;
+		String tally = ClientQuestState.openTasks() + " left";
 		int tallyRight = closeX() - 6;
 
 		g.text(font, tally, tallyRight - font.width(tally), pageTop, TEXT_DIM, false);
@@ -488,7 +500,7 @@ public class QuestBookScreen extends Screen {
 		int listTop = listTop();
 		int y = listTop - (int) scroll;
 
-		for (QuestSyncPayload.QuestEntry quest : ClientQuestState.quests()) {
+		for (QuestSyncPayload.QuestEntry quest : ClientQuestState.openQuests()) {
 			// The quest's own title row occupies this space; it is not a task and
 			// so must not be pin-targetable.
 			y += LINE_HEIGHT + QUEST_GAP;
@@ -545,11 +557,11 @@ public class QuestBookScreen extends Screen {
 	private int listContentHeight() {
 		int rows = 0;
 
-		for (QuestSyncPayload.QuestEntry quest : ClientQuestState.quests()) {
+		for (QuestSyncPayload.QuestEntry quest : ClientQuestState.openQuests()) {
 			rows += 1 + quest.tasks().size();
 		}
 
-		return rows * LINE_HEIGHT + ClientQuestState.quests().size() * QUEST_GAP;
+		return rows * LINE_HEIGHT + ClientQuestState.openQuests().size() * QUEST_GAP;
 	}
 
 	@Override
