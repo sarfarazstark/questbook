@@ -145,6 +145,8 @@ public final class AdminQuestScreen extends Screen {
 
 			Task list:
 			""";
+	/** Ticks remaining on the dialog's "Copied!" feedback, 0 = hidden. */
+	private int aiCopiedTicks = 0;
 	private boolean newQuestDialogOpen = false;
 	/** Dialog committed as a rename of the selected quest instead of a create. */
 	private boolean renameMode = false;
@@ -1257,11 +1259,12 @@ public final class AdminQuestScreen extends Screen {
 		g.text(font, "Cancel", cancelBtnX + 4, btnY + 4, TEXT_MUTED, false);
 
 		// [AI Prompt] — copies the converter prompt to the clipboard.
-		int aiW = font.width("AI Prompt") + 8;
+		String aiLabel = aiCopiedTicks > 0 ? "Copied!" : "AI Prompt";
+		int aiW = font.width(aiLabel) + 8;
 		int aiX = cancelBtnX - aiW - 6;
 		boolean aiHover = mouseX >= aiX && mouseX <= aiX + aiW && mouseY >= btnY && mouseY <= btnY + 16;
 		g.fill(aiX, btnY, aiX + aiW, btnY + 16, aiHover ? BTN_SECONDARY_HOVER : BTN_SECONDARY);
-		g.text(font, "AI Prompt", aiX + 4, btnY + 4, TEXT_MUTED, false);
+		g.text(font, aiLabel, aiX + 4, btnY + 4, aiCopiedTicks > 0 ? TEXT_GREEN : TEXT_MUTED, false);
 	}
 
 	// --- DROPDOWN OVERLAY ----------------------------------------------------
@@ -1466,10 +1469,11 @@ public final class AdminQuestScreen extends Screen {
 		}
 
 		// [AI Prompt]
-		int aiBtnW = font.width("AI Prompt") + 8;
+		int aiBtnW = font.width(aiCopiedTicks > 0 ? "Copied!" : "AI Prompt") + 8;
 		int aiBtnX = cancelBtnX - aiBtnW - 6;
 		if (mx >= aiBtnX && mx <= aiBtnX + aiBtnW && my >= btnY && my <= btnY + 16) {
 			minecraft.keyboardHandler.setClipboard(IMPORT_PROMPT);
+			aiCopiedTicks = 40;
 			return true;
 		}
 
@@ -1980,6 +1984,14 @@ public final class AdminQuestScreen extends Screen {
 		}
 
 		closeItemPicker();
+	}
+
+	@Override
+	public void tick() {
+		if (aiCopiedTicks > 0) {
+			aiCopiedTicks--;
+		}
+		super.tick();
 	}
 
 	@Override
