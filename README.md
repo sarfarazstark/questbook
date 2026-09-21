@@ -1,297 +1,103 @@
 # Quest Book
 
-A Fabric mod for Minecraft 26.2. Admins create **quests**, each containing
-**tasks** assigned to individual players. Progress tracks automatically.
+A Fabric mod for Minecraft 26.2. Admins create **quests**, each a list of **tasks**
+assigned to individual players ("collect 64 oak logs"). Progress tracks
+automatically as players pick items up or craft them. Players view their tasks in
+an in-game book; a leaderboard ranks contributors.
 
 - **Mod id:** `questbook`
-- **Package:** `com.questbook`
-- **MC:** 26.2 · **Loader:** 0.19.5 · **Fabric API:** 0.161.0+26.2 · **Java:** 25
+- **MC:** 26.2 · **Loader:** >= 0.19.5 · **Fabric API:** required (not bundled) · **Java:** 25
 
-## Model
+## Installation
 
-```
-Quest  "Build a Cottage"
-  ├─ Task  minecraft:oak_log    64  → Alex   0/64
-  ├─ Task  minecraft:cobblestone 32 → Sam    12/32
-  └─ Task  minecraft:glass      16  → Alex   16/16  done
-```
+1. Install Fabric Loader and the Fabric API for MC 26.2.
+2. Drop the Quest Book jar into `mods/` on the **server and on every client**
+   (the book GUI is client-side, so players need the jar too).
 
-Two rules, taken literally:
+## For players
 
-1. **One task has exactly one assignee.** A task stores a single `assignee` UUID.
-2. **One player may hold many tasks.** Hence one-to-many from the task side —
-   no join table, and each player's progress is naturally independent.
+Press **J** to open your book: the quests you have tasks in, each with progress.
+Quests you have no tasks in never appear.
 
-A **quest completes** when *every* task in it completes. Its reward then fires.
-
-A quest may also declare **prerequisites** — other quests that must complete
-first. `/questbook tree` shows the dependency graph; a locked quest is marked
-`[locked]` until every prerequisite is done.
-
-## Tracking
-
-Progress advances only when the **assignee** collects the required item. Another
-player's pickups are ignored — that is the assignee rule made real.
-
-Two hooks, both server-side:
-
-| Event | Hook | Why |
-|---|---|---|
-| Item pickup | `ItemEntityMixin` | **No Fabric API event exists for pickup** |
-| Craft output | `ItemStackMixin` | No API event covers craft output |
-
-Both are required; neither is optional.
-
-## Persistence
-
-Uses vanilla `SavedData` + a Mojang `Codec`, written to
-`world/data/questbook/goals.dat`.
-
-**MC 26.2 renamed this API.** `PersistentState` no longer exists:
-
-| Old | 26.2 |
-|---|---|
-| `PersistentState` | `SavedData` |
-| `PersistentState.Type` | `SavedDataType` (a record) |
-| `DimensionDataStorage` | `SavedDataStorage` |
-
-There is also **no Fabric API wrapper** for it — vanilla's is used directly.
-`SavedData` has no `save()` method; mutating calls `setDirty()` and vanilla
-flushes on the world save.
-
-## Commands
-
-Editing requires **OP level 2**, because a `COMMAND` reward is a
-privilege-escalation surface.
+Useful commands (no permission needed):
 
 ```
-/questbook new <quest>                            create a quest
-/questbook add <quest> <player> <item> <count>    add a task, assigned
-/questbook assign <quest> <task> <player>         reassign a task
-/questbook delete <quest>                         remove a quest
-/questbook require <quest> <prerequisite>         lock behind another quest
-/questbook unrequire <quest> <prerequisite>       unlock
-/questbook reward item <quest> <item> <count>     quest item reward
-/questbook reward xp <quest> <levels>             quest xp reward
-/questbook reward command <quest> <template>      quest command reward
-/questbook reward clear <quest>                   remove the reward
-/questbook taskreward item <quest> <task> <item> <count>    task item reward
-/questbook taskreward xp <quest> <task> <levels>            task xp reward
-/questbook taskreward command <quest> <task> <template>     task command reward
-/questbook taskreward clear <quest> <task>                  remove the task reward
-/questbook list                                    all quests and tasks
-/questbook tree                                    dependency graph
-/questbook top [limit]                             leaderboard, 10 by default
-/questbook stats [player]                          points, tasks, quests
-/questbook mine                                    your assigned tasks
-/questbook discord url <webhook>                   set the Discord webhook
-/questbook discord off                              stop posting
-/questbook discord test                             send a probe message
-/questbook discord status                           show the current config
-/questbook editor add <player>                      grant quest editing without OP
-/questbook editor remove <player>                   revoke, player online
-/questbook editor remove id <uuid|8-char-prefix>    revoke, player offline
-/questbook editor list                              who can edit, and why
+/questbook mine             your assigned tasks
+/questbook top [limit]      leaderboard, 10 by default (1-100)
+/questbook stats [player]   points, tasks and quests completed
+/questbook list             all quests and tasks
+/questbook tree             every quest and what it asks for
+```
+
+**Points:** 1 per completed task, 10 per completed quest. Counted from
+completions, so editing or deleting a task never takes points away.
+
+## For admins
+
+Press **K** to open the Admin Quest Manager (OP level 2, or an editor grant —
+the server decides, so editors without OP get in too):
+
+- **Browse:** all quests with progress; expand a quest to see its tasks,
+  reassign them, or delete quests/tasks with `[x]`.
+- **Creation studio:** pick an item from the tabbed picker (search, count,
+  assignee cycling through online players), stage tasks, name the quest, commit.
+
+Or use commands. Everything that edits quests needs **OP level 2** or an editor
+grant:
+
+```
+/questbook new <quest>                         create a quest
+/questbook add <quest> <player> <item> <count> add a task, assigned
+/questbook assign <quest> <task> <player>      reassign a task
+/questbook delete <quest>                      remove a quest
 ```
 
 A quest may be named or given by UUID, so duplicate names stay addressable.
-A task takes a **UUID prefix** (the id printed beside it in `/questbook list`),
-not an item name.
+A task takes an id prefix (the id printed beside it in `/questbook list`), an
+item name, or the `"name <idprefix>"` form for duplicates.
+
+A quest is complete when **every** task in it is complete. One task has exactly
+one assignee; only the assignee's pickups and crafting advance it.
 
 ### Editor access
 
-Everything that edits quests is **OP level 2** by default. `/questbook editor
-add` hands the same ability to a specific player without the OP tag.
+`/questbook editor add <player>` grants quest editing without the OP tag.
+Editor management itself stays OP-only and can never be granted by an editor.
 
-Editor management itself stays **OP 2+** and can never be granted by an editor —
-an editor who could grant editor access could widen their own rank, which defeats
-the point of not handing out OP. `mayEdit()` is the single gate shared by the
-command tree, the admin action receiver and the admin sync fan-out, so the three
-cannot drift apart.
+- `editor add` refuses players who already hold OP level 2 (the grant would be
+  redundant, and it would survive a later `/deop`).
+- `editor remove <player>` needs them online; `editor remove id <uuid>`
+  works offline and accepts the short form `editor list` prints.
+- `editor list` shows operators and grantees separately.
 
-`editor add` refuses a player who already holds OP level 2, since the grant would
-be invisible weight: they can already edit, and the list would show a redundant
-entry. `editor list` shows operators and grantees separately, so hidden OP access
-is never mistaken for "nobody can edit".
+## Discord (optional)
 
-Revoking by **name** needs the player online. Revoking by **id** does not, which
-matters for the case where the grant outlives the last operator who could undo
-it — the console escape hatch. The id accepts a full UUID or any hex prefix of
-one, so the short form `editor list` prints can be pasted straight back in.
-
-## Rewards
-
-Three kinds, which between them cover everything without new code per idea:
-
-| Kind | Grants |
-|---|---|
-| `ITEM` | N of an item, dropped if the inventory is full |
-| `XP` | N experience levels |
-| `COMMAND` | runs a server command, `%player%` substituted |
-
-`COMMAND` is the extensible one — any reward expressible as a command works with
-no mod change. `%player%` is substituted from the player object, never from user
-input, so it cannot inject command syntax.
-
-Rewards exist at **two levels**, and the distinction matters:
-
-| Level | Fires when | Points |
-|---|---|---|
-| Task reward | that one task completes | 1 |
-| Quest reward | every task in the quest completes | 10 |
-
-Both levels are optional, and a quest with a task reward set still grants its
-quest reward on top — they stack deliberately.
-
-Paid rewards are recorded **in the saved data**, not in memory, so a restart
-cannot re-grant them.
-
-## Design decisions
-
-**Why `COMMAND` rewards are gated.** Reward editing is OP 2+. A lower-privileged
-editor could otherwise name `/op` or similar.
-
-**Why rewards fire on the server tick.** A command reward must run on the server
-thread; detecting completion on the tick keeps that guaranteed rather than
-depending on where the tracker was called from.
-
-**Why offline recipients are skipped, not queued.** Queuing needs a persistent
-per-player pending list. Out of scope for this phase; the skip is logged.
-
-## The book
-
-Press **J** to open. A parchment page listing the quests this player has tasks in,
-each with its tasks and progress.
-
-```
-+----------------------------------------+
-| Quest Book                        [x]  |
-| My Tasks                    1/3 done   |
-|----------------------------------------|
-| Build a Cottage                        |
-|   ( ) Oak log  ####------  10/64       |
-|   ( ) Cobblestone  ###---  12/32       |
-| Reward Test                            |
-|   (v) Stone  ##########  5/5           |
-|----------------------------------------|
-| scroll for more                        |
-+----------------------------------------+
-```
-
-**Verification keybind:** `J` — free in vanilla (`L` is Advancements).
-
-### Looks
-
-The parchment is drawn with **solid fills**, not a texture, using colours sampled
-from `assets/minecraft/textures/gui/book.png`. Vanilla's book sprite is a single
-192×192 page with no two-page variant, so it cannot be scaled to a larger panel —
-see `.research/book-reference.md` for the measured palette and the verdict.
-
-| Element | Colour |
-|---|---|
-| Page | `#FDF7EA` |
-| Page edge | `#D1BFA1` |
-| Border bands | `#75321E` → `#652816` → `#4C1A0B` → `#1C0F00` |
-| Progress bar fill | `#C3251D` |
-| Completed | `#2E7D32` |
-
-### Networking
-
-The server sends only **this player's** tasks — a player has no reason to see
-another player's assignments, and sending them would leak the whole plan.
-
-| When | What |
-|---|---|
-| Player joins | full sync of their tasks |
-| Admin runs any editing command | push to every online client |
-
-Titles are resolved **server-side**, so the client never touches the item registry
-to render a row.
-
-## Verification
-
-**Static**
-- `gradlew build` — clean
-- `gradlew runModelCheck` — 24 model assertions
-
-**End-to-end, on a live server with a real client**
-
-| Step | Observed |
-|---|---|
-| Quest + task created | `Added task ...: 10 x minecraft:oak_log for Player424` |
-| Player picked up items | `Player424 completed Oak log` |
-| Progress advanced | `0/10` → `10/10` |
-| Quest completed | `Quest complete: Test Quest`, listing shows `1/1` |
-| **Command reward ran** | `[Server] REWARD_FIRED_FOR_Player424` — `%player%` substituted |
-| No double-grant | command executed **once**, not per tick |
-| Survived restart | both quests reloaded at `10/10` and `5/5` |
-| **No re-grant after restart** | zero reward events in the new run |
-| **Sync on join** | client logged `Received 0 quest(s) from server` |
-| **Live push** | after an admin command, `Received 1 quest(s) from server` |
-
-**Not verified:** the book's appearance. The client is a desktop GUI window, which
-cannot be driven or captured from here.
-
-**Dev-server requirements:** `online-mode=false` in `run/server/server.properties`
-(the dev client is offline and an online-mode server drops it as `Disconnected`).
-
-## Admin UI
-
-Press **K** to open the Admin Quest Manager (requires OP permission level 2+).
-
-- **Browse Mode**:
-  - Lists all server quests and their progress.
-  - Click any quest to expand/collapse its tasks, displaying each task's item, required count, progress, assigned player name, and completion status.
-  - Delete individual quests or tasks with the `[x]` button.
-  - Click `+ New Quest` to open the quest creation studio.
-
-- **Quest Creation Mode**:
-  - **Left Pane - Item Picker**:
-    - Vertical category tabs on the far left (Building, Colored, Natural, Functional, Redstone, Tools, Combat, Food, Ingredients, All).
-    - Search box for filtering items/blocks live.
-    - Scrollable grid of item icons with hover tooltips.
-    - Count input box.
-    - Assignee selector (cycles through online players or "Unassigned").
-    - `+ Add` button to stage a task into the new quest.
-  - **Right Pane - Quest Sheet**:
-    - Quest name input field at top.
-    - List of tasks added to the quest so far.
-    - `[ Create Quest ]` to commit the quest and all its tasks to the server.
-    - `[ Cancel ]` to return to Browse mode.
-
-## Discord
-
-Optional. A webhook URL turns the mod into a one-way feed of quest events.
+A webhook URL turns the mod into a one-way feed of quest events:
 
 ```
 /questbook discord url https://discord.com/api/webhooks/...
 /questbook discord status      # confirm it took
 /questbook discord test        # post a probe
+/questbook discord off         # stop posting
 ```
 
-Config lives in `config/questbook-discord.json` (the server's config directory,
-resolved from the working directory, so it is never written into the mod jar). It
-is read once at startup and cached — change it with the commands below, or restart
-the server after editing the file by hand. The `off` subcommand clears the URL;
-two event toggles (`announceQuests`, `announceTasks`) control what is posted.
+Config lives in `config/questbook-discord.json`. It is read at startup and
+cached — the `url`/`off` commands update it live, but the two event toggles
+(`announceQuests`, on by default; `announceTasks`, off by default) need a
+hand-edit plus a restart. Posts are asynchronous with short timeouts; a dead
+webhook is logged and dropped, never retried, so it can never stall the tick.
 
-Posts are **asynchronous** — `HttpClient.sendAsync` on the shared client, with a
-10s request timeout and a 5s connect timeout. A dead or slow webhook can never
-stall the server tick, which is what keeps a chat-integration bug from becoming a
-TPS bug. Failures are logged and dropped rather than retried.
+## Data file
 
-## Not in this phase
+Quests, points and editor grants live in vanilla saved data at
+`world/data/questbook/goals.dat` (key `questbook:goals`). It flushes on the
+world save, so run `save-all flush` before inspecting it by hand.
 
-- GUI editing of quest prerequisites (commands cover it)
+## Building
 
-## Research carried over
+```
+.\gradlew.bat build            # compile
+.\gradlew.bat runModelCheck    # 24 model assertions
+```
 
-`.research/` holds the verified findings from the previous attempt, so the
-mistakes are not repeated:
-
-| File | Contains |
-|---|---|
-| `book-reference.md` | measured vanilla book palette, **single-page** verdict |
-| `persistence-and-events.md` | 26.2 `SavedData`, lifecycle event signatures |
-| `keybinds.md` | free keys (**L is taken by Advancements**) |
-| `amcdb.md`, `amcdb-integration.md` | AMCDB mechanism |
+Requires JDK 25 (pinned in `gradle.properties`).

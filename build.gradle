@@ -81,13 +81,6 @@ java {
 	targetCompatibility = JavaVersion.VERSION_25
 }
 
-jar {
-	def projectName = project.name
-	from("LICENSE") {
-		rename { "${it}_${project.base.archivesName.get()}" }
-	}
-}
-
 // Runs the model self-check with the Minecraft classpath available.
 tasks.register('runModelCheck', JavaExec) {
 	group = 'verification'
