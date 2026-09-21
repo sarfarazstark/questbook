@@ -18,6 +18,11 @@ loom {
 }
 
 loom.runs {
+	// -Dquestbook.capture only reaches the game if it is forwarded explicitly: Gradle
+	// consumes -D itself, so passing it on the gradlew command line sets a Gradle
+	// property and the forked game JVM never sees it.
+	String capture = project.findProperty("questbook.capture") ?: "book"
+
 	server {
 		runDir "run/server"
 	}
@@ -25,6 +30,7 @@ loom.runs {
 		runDir "run/client"
 		programArgs "--username", (project.findProperty("clientUser") ?: "DevTester")
 		programArgs "--quickPlayMultiplayer", "localhost:25565"
+		property "questbook.capture", capture
 	}
 	client2 {
 		inherit client

@@ -91,7 +91,9 @@ public final class QuestText {
 	/** A command that could not be carried out. */
 	public static Component failure(String message) {
 		MutableComponent msg = Component.empty();
-		msg.append(Component.literal("\u2716 ").withStyle(s -> s.withColor(0xE57373)));
+		// U+2715, matching the close and delete crosses in the editor. One cross glyph
+		// across the mod, so a refusal reads as the same mark the player clicks.
+		msg.append(Component.literal("\u2715 ").withStyle(s -> s.withColor(0xE57373)));
 		msg.append(Component.literal(message).withStyle(s -> s.withColor(0xE0E0E0)));
 		return msg;
 	}
