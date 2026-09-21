@@ -4,6 +4,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 
 import com.questbook.QuestBook;
+import com.questbook.util.QuestText;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -62,8 +63,10 @@ public final class DiscordNotifier {
 			return;
 		}
 
-		post("Task complete", playerName + " collected " + count + "x " + itemId + " in " + questName,
-				0x1E88E5);
+		// Display name, not the registry id: an embed reading "minecraft:oak_log" looks
+		// like a debug dump, and the chat message beside it already says "Oak log".
+		post("Task complete", playerName + " collected " + count + "x "
+				+ QuestText.displayName(itemId) + " in " + questName, 0x1E88E5);
 	}
 
 	/** Fires a payload straight through, for {@code /questbook discord test}. */

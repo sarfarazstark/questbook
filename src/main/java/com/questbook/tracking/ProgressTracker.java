@@ -143,6 +143,16 @@ public final class ProgressTracker {
 			if (!wasComplete) {
 				server.getPlayerList().broadcastSystemMessage(
 						QuestText.questCompleted(quest.name()), false);
+
+				// Discord too, or a configured webhook stayed silent for the one event
+				// it is most likely to be wanted for. Contributor count is the number of
+				// distinct assignees across the quest's tasks.
+				int contributors = (int) quest.tasks().stream()
+						.map(Task::assignee)
+						.filter(id -> !id.equals(Task.UNASSIGNED))
+						.distinct()
+						.count();
+				DiscordNotifier.questCompleted(quest.name(), contributors);
 			}
 		}
 	}
