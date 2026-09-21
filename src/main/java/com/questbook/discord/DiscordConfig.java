@@ -41,13 +41,6 @@ public final class DiscordConfig {
 		return cached;
 	}
 
-	/** Re-reads the file, discarding the cached copy. */
-	public static synchronized DiscordConfig reload() {
-		cached = read();
-
-		return cached;
-	}
-
 	private static DiscordConfig read() {
 		Path path = path();
 

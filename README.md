@@ -88,11 +88,36 @@ privilege-escalation surface.
 /questbook discord off                              stop posting
 /questbook discord test                             send a probe message
 /questbook discord status                           show the current config
+/questbook editor add <player>                      grant quest editing without OP
+/questbook editor remove <player>                   revoke, player online
+/questbook editor remove id <uuid|8-char-prefix>    revoke, player offline
+/questbook editor list                              who can edit, and why
 ```
 
 A quest may be named or given by UUID, so duplicate names stay addressable.
 A task takes a **UUID prefix** (the id printed beside it in `/questbook list`),
 not an item name.
+
+### Editor access
+
+Everything that edits quests is **OP level 2** by default. `/questbook editor
+add` hands the same ability to a specific player without the OP tag.
+
+Editor management itself stays **OP 2+** and can never be granted by an editor —
+an editor who could grant editor access could widen their own rank, which defeats
+the point of not handing out OP. `mayEdit()` is the single gate shared by the
+command tree, the admin action receiver and the admin sync fan-out, so the three
+cannot drift apart.
+
+`editor add` refuses a player who already holds OP level 2, since the grant would
+be invisible weight: they can already edit, and the list would show a redundant
+entry. `editor list` shows operators and grantees separately, so hidden OP access
+is never mistaken for "nobody can edit".
+
+Revoking by **name** needs the player online. Revoking by **id** does not, which
+matters for the case where the grant outlived the last operator who could undo
+it — the console escape hatch. An 8-character UUID prefix resolves, so you do not
+have to transcribe a full UUID under pressure.
 
 ## Rewards
 
@@ -187,7 +212,7 @@ to render a row.
 
 **Static**
 - `gradlew build` — clean
-- `gradlew runModelCheck` — 87 model assertions
+- `gradlew runModelCheck` — 24 model assertions
 
 **End-to-end, on a live server with a real client**
 
@@ -244,14 +269,16 @@ Optional. A webhook URL turns the mod into a one-way feed of quest events.
 /questbook discord test        # post a probe
 ```
 
-Config lives in `world/questbook-discord.json`, is read fresh on every post
-(no restart after editing), and is never written to the mod jar. The `off`
-subcommand clears the URL; three event toggles (`announceQuests`,
-`announceTasks`, `announceRewards`) control what is posted.
+Config lives in `config/questbook-discord.json` (the server's config directory,
+resolved from the working directory, so it is never written into the mod jar). It
+is read once at startup and cached — change it with the commands below, or restart
+the server after editing the file by hand. The `off` subcommand clears the URL;
+two event toggles (`announceQuests`, `announceTasks`) control what is posted.
 
-Posts are **fire-and-forget on a daemon thread** — a dead or slow webhook can
-never stall the server tick, which is what keeps a chat-integration bug from
-becoming a TPS bug.
+Posts are **asynchronous** — `HttpClient.sendAsync` on the shared client, with a
+10s request timeout and a 5s connect timeout. A dead or slow webhook can never
+stall the server tick, which is what keeps a chat-integration bug from becoming a
+TPS bug. Failures are logged and dropped rather than retried.
 
 ## Not in this phase
 
