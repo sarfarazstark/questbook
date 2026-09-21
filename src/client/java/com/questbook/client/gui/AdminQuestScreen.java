@@ -635,10 +635,13 @@ public final class AdminQuestScreen extends Screen {
 		int nameColor = task.assignee().equals(Task.UNASSIGNED) ? TEXT_RED : TEXT_CYAN;
 		g.text(font, font.plainSubstrByWidth(assignee, assignW - 2), assignX + 2, y + 3, nameColor, false);
 
-		// Delete [✕]
+		// Delete [✕] — TEXT_MUTED, not TEXT_DIM. Measured against this row's own
+		// background, DIM lands at 2.49:1, about half the readable minimum, so the
+		// glyph was drawing but could not be seen. The quest card's delete can use DIM
+		// because a card sits on a lighter surface; this row is tinted darker.
 		int delX = x + w - 8;
 		boolean delHover = mouseX >= delX - 2 && mouseX <= delX + 8 && mouseY >= y + 1 && mouseY <= y + rowH - 1 && !modalOpen();
-		g.text(font, "\u2715", delX, y + 3, delHover ? TEXT_RED : TEXT_DIM, false);
+		g.text(font, "\u2715", delX, y + 3, delHover ? TEXT_RED : TEXT_MUTED, false);
 
 		// Tooltip on task hover
 		if (hover && mouseX < delX - 4) {
@@ -798,8 +801,13 @@ public final class AdminQuestScreen extends Screen {
 		int ruleY = hy + HDR_PROGRESS_Y + HDR_RULE_GAP;
 		g.fill(x, ruleY, x + w, ruleY + HDR_RULE_H, PANEL_BORDER);
 
-		// Tasks — clipped so a row near the bottom edge cannot bleed past the pane.
-		g.enableScissor(rightPaneLeft, listTop, rightPaneLeft + rightPaneWidth - 12, listBottom - 14);
+		// Tasks — clipped vertically so a row near the bottom edge cannot bleed past
+		// the pane, but horizontally it must reach the same right edge the rows use.
+		//
+		// The clip used to stop 8px short of x + w, which silently swallowed each row's
+		// delete button: the glyph starts exactly at x + w - 8, so it had zero visible
+		// width and looked like it had never been drawn.
+		g.enableScissor(rightPaneLeft, listTop, x + w, listBottom - 14);
 		if (quest.tasks().isEmpty()) {
 			g.text(font, "No tasks yet.", x, y + 2, TEXT_DIM, false);
 			y += 14;
