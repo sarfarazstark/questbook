@@ -6,7 +6,6 @@ import com.questbook.discord.DiscordConfig;
 import com.questbook.discord.DiscordNotifier;
 import com.questbook.network.QuestNetworking;
 import com.questbook.data.QuestStore;
-import com.questbook.data.Reward;
 import com.questbook.data.Task;
 import com.questbook.storage.QuestSavedData;
 import com.questbook.tracking.Quests;
@@ -65,56 +64,6 @@ public final class QuestCommands {
 								.then(Commands.argument("task", StringArgumentType.string())
 										.then(Commands.argument("player", EntityArgument.player())
 												.executes(QuestCommands::assign)))))
-				.then(Commands.literal("reward")
-						.requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
-						.then(Commands.literal("item")
-								.then(Commands.argument("quest", StringArgumentType.string())
-										.then(Commands.argument("item", IdentifierArgument.id())
-												.then(Commands.argument("count", IntegerArgumentType.integer(1))
-														.executes(QuestCommands::rewardItem)))))
-						.then(Commands.literal("xp")
-								.then(Commands.argument("quest", StringArgumentType.string())
-										.then(Commands.argument("levels", IntegerArgumentType.integer(1))
-												.executes(QuestCommands::rewardXp))))
-						.then(Commands.literal("command")
-								.then(Commands.argument("quest", StringArgumentType.string())
-										.then(Commands.argument("template", StringArgumentType.greedyString())
-												.executes(QuestCommands::rewardCommand))))
-						.then(Commands.literal("clear")
-								.then(Commands.argument("quest", StringArgumentType.string())
-										.executes(QuestCommands::rewardClear))))
-				.then(Commands.literal("taskreward")
-						.requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
-						.then(Commands.literal("item")
-								.then(Commands.argument("quest", StringArgumentType.string())
-										.then(Commands.argument("task", StringArgumentType.string())
-												.then(Commands.argument("item", IdentifierArgument.id())
-														.then(Commands.argument("count", IntegerArgumentType.integer(1))
-																.executes(QuestCommands::taskRewardItem))))))
-						.then(Commands.literal("xp")
-								.then(Commands.argument("quest", StringArgumentType.string())
-										.then(Commands.argument("task", StringArgumentType.string())
-												.then(Commands.argument("levels", IntegerArgumentType.integer(1))
-														.executes(QuestCommands::taskRewardXp)))))
-						.then(Commands.literal("command")
-								.then(Commands.argument("quest", StringArgumentType.string())
-										.then(Commands.argument("task", StringArgumentType.string())
-												.then(Commands.argument("template", StringArgumentType.greedyString())
-														.executes(QuestCommands::taskRewardCommand)))))
-						.then(Commands.literal("clear")
-								.then(Commands.argument("quest", StringArgumentType.string())
-										.then(Commands.argument("task", StringArgumentType.string())
-												.executes(QuestCommands::taskRewardClear)))))
-				.then(Commands.literal("require")
-						.requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
-						.then(Commands.argument("quest", StringArgumentType.string())
-								.then(Commands.argument("prerequisite", StringArgumentType.string())
-										.executes(QuestCommands::require))))
-				.then(Commands.literal("unrequire")
-						.requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
-						.then(Commands.argument("quest", StringArgumentType.string())
-								.then(Commands.argument("prerequisite", StringArgumentType.string())
-										.executes(QuestCommands::unrequire))))
 				.then(Commands.literal("discord")
 						.requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
 						.then(Commands.literal("url")
@@ -239,208 +188,9 @@ public final class QuestCommands {
 		return 1;
 	}
 
-	// --- rewards -------------------------------------------------------------
+	// --- quest list ----------------------------------------------------------
 
-	private static int rewardItem(CommandContext<CommandSourceStack> ctx) {
-		return setReward(ctx, Reward.item(
-				ctx.getArgument("item", Identifier.class).toString(),
-				IntegerArgumentType.getInteger(ctx, "count")));
-	}
-
-	private static int rewardXp(CommandContext<CommandSourceStack> ctx) {
-		return setReward(ctx, Reward.xp(IntegerArgumentType.getInteger(ctx, "levels")));
-	}
-
-	private static int rewardCommand(CommandContext<CommandSourceStack> ctx) {
-		Reward reward = Reward.command(StringArgumentType.getString(ctx, "template"));
-
-		if (!reward.isSane()) {
-			failure(ctx, "Command template is empty or contains a newline");
-			return 0;
-		}
-
-		return setReward(ctx, reward);
-	}
-
-	/** Sets the reward for a quest, echoing the human-readable form of it. */
-	private static int setReward(CommandContext<CommandSourceStack> ctx, Reward reward) {
-		QuestSavedData data = data(ctx);
-
-		if (data == null) {
-			return 0;
-		}
-
-		Optional<Quest> found = findQuest(data.store(), StringArgumentType.getString(ctx, "quest"));
-
-		if (found.isEmpty()) {
-			return noSuchQuest(ctx);
-		}
-
-		data.setReward(found.get(), Optional.of(reward));
-		sync(ctx);
-
-		MutableComponent msg = Component.empty();
-		msg.append(QuestText.brand());
-		msg.append(Component.literal("\u00a7a Reward set for \u00a7f"));
-		msg.append(chromaticName(found.get().name()));
-		msg.append(Component.literal("\u00a7a: \u00a7f"));
-		msg.append(QuestText.rewardSummary(reward.kind().name(), reward.value(), reward.amount()));
-		ctx.getSource().sendSuccess(() -> msg, false);
-
-		return 1;
-	}
-
-	private static int rewardClear(CommandContext<CommandSourceStack> ctx) {
-		QuestSavedData data = data(ctx);
-
-		if (data == null) {
-			return 0;
-		}
-
-		Optional<Quest> found = findQuest(data.store(), StringArgumentType.getString(ctx, "quest"));
-
-		if (found.isEmpty()) {
-			return noSuchQuest(ctx);
-		}
-
-		data.setReward(found.get(), Optional.empty());
-		sync(ctx);
-		success(ctx, "Reward cleared");
-
-		return 1;
-	}
-
-	// --- per-task rewards ----------------------------------------------------
-
-	private static int taskRewardItem(CommandContext<CommandSourceStack> ctx) {
-		return setTaskReward(ctx, Optional.of(Reward.item(
-				ctx.getArgument("item", Identifier.class).toString(),
-				IntegerArgumentType.getInteger(ctx, "count"))));
-	}
-
-	private static int taskRewardXp(CommandContext<CommandSourceStack> ctx) {
-		return setTaskReward(ctx, Optional.of(Reward.xp(IntegerArgumentType.getInteger(ctx, "levels"))));
-	}
-
-	private static int taskRewardCommand(CommandContext<CommandSourceStack> ctx) {
-		Reward reward = Reward.command(StringArgumentType.getString(ctx, "template"));
-
-		if (!reward.isSane()) {
-			failure(ctx, "Command template is empty or contains a newline");
-			return 0;
-		}
-
-		return setTaskReward(ctx, Optional.of(reward));
-	}
-
-	private static int taskRewardClear(CommandContext<CommandSourceStack> ctx) {
-		return setTaskReward(ctx, Optional.empty());
-	}
-
-	/**
-	 * Sets or clears the reward on one task.
-	 *
-	 * <p>Only the assignee is ever paid a task reward, which is why this lives
-	 * beside the task rather than on the quest: the quest reward is shared.
-	 */
-	private static int setTaskReward(CommandContext<CommandSourceStack> ctx, Optional<Reward> reward) {
-		QuestSavedData data = data(ctx);
-
-		if (data == null) {
-			return 0;
-		}
-
-		Optional<Quest> found = findQuest(data.store(), StringArgumentType.getString(ctx, "quest"));
-
-		if (found.isEmpty()) {
-			return noSuchQuest(ctx);
-		}
-
-		Optional<Task> task = findTask(found.get(), StringArgumentType.getString(ctx, "task"));
-
-		if (task.isEmpty()) {
-			failure(ctx, "No such task. Tasks are named by UUID prefix — see /questbook list");
-			return 0;
-		}
-
-		Quest quest = found.get();
-		Task target = task.get();
-
-		data.setStore(data.store().updateTask(quest.id(), target.id(), t -> t.withReward(reward)));
-		sync(ctx);
-
-		if (reward.isPresent()) {
-			Reward r = reward.get();
-			MutableComponent msg = Component.empty();
-			msg.append(QuestText.brand());
-			msg.append(Component.literal("\u00a7a Task reward set: \u00a7f"));
-			msg.append(QuestText.rewardSummary(r.kind().name(), r.value(), r.amount()));
-			msg.append(Component.literal(" \u00a77for \u00a7f" + QuestText.displayName(target.itemId())
-					+ " \u00a78(" + target.id() + ")"));
-			ctx.getSource().sendSuccess(() -> msg, false);
-		} else {
-			success(ctx, "Task reward cleared for " + QuestText.displayName(target.itemId()));
-		}
-
-		return 1;
-	}
-
-	// --- quest tree ----------------------------------------------------------
-
-	private static int require(CommandContext<CommandSourceStack> ctx) {
-		return linkPrerequisite(ctx, true);
-	}
-
-	private static int unrequire(CommandContext<CommandSourceStack> ctx) {
-		return linkPrerequisite(ctx, false);
-	}
-
-	private static int linkPrerequisite(CommandContext<CommandSourceStack> ctx, boolean add) {
-		QuestSavedData data = data(ctx);
-
-		if (data == null) {
-			return 0;
-		}
-
-		Optional<Quest> found = findQuest(data.store(), StringArgumentType.getString(ctx, "quest"));
-
-		if (found.isEmpty()) {
-			return noSuchQuest(ctx);
-		}
-
-		Optional<Quest> prerequisite = findQuest(data.store(),
-				StringArgumentType.getString(ctx, "prerequisite"));
-
-		if (prerequisite.isEmpty()) {
-			failure(ctx, "No such prerequisite quest. Use /questbook list");
-			return 0;
-		}
-
-		Quest quest = found.get();
-
-		if (quest.id().equals(prerequisite.get().id())) {
-			failure(ctx, "A quest cannot require itself");
-			return 0;
-		}
-
-		Quest next = add
-				? quest.withPrerequisite(prerequisite.get().id())
-				: quest.withoutPrerequisite(prerequisite.get().id());
-
-		if (next == quest) {
-			info(ctx, (add ? "Already required: " : "Was not required: ")
-					+ prerequisite.get().name());
-			return 0;
-		}
-
-		data.setStore(data.store().withQuest(next));
-		sync(ctx);
-		success(ctx, (add ? "Now requires " : "No longer requires ") + prerequisite.get().name()
-				+ " for " + quest.name());
-
-		return 1;
-	}
-
+	/** Lists every quest and what it asks for. */
 	private static int tree(CommandContext<CommandSourceStack> ctx) {
 		QuestSavedData data = data(ctx);
 
@@ -455,53 +205,15 @@ public final class QuestCommands {
 			return 0;
 		}
 
-		info(ctx, "Quest tree");
+		info(ctx, "Quests");
 
-		java.util.Set<UUID> printed = new java.util.HashSet<>();
-
-		// Roots first, then each quest under the prerequisites it names, so the
-		// printed tree mirrors the dependency order rather than creation order.
 		for (Quest quest : store.quests()) {
-			if (!quest.prerequisites().isEmpty()) {
-				continue;
-			}
-
-			printTree(ctx, store, quest, 1, printed);
+			MutableComponent msg = Component.empty();
+			msg.append(QuestText.treeRow(quest.name(), quest.completedCount(), quest.tasks().size()));
+			ctx.getSource().sendSuccess(() -> msg, false);
 		}
 
-		// Anything still unprinted is part of a cycle, or hangs off one. The
-		// guard must be the printed set — a containment test is always true,
-		// which reprints the entire tree a second time.
-		for (Quest quest : store.quests()) {
-			if (printed.contains(quest.id())) {
-				continue;
-			}
-
-			printTree(ctx, store, quest, 1, printed);
-		}
-
-		return printed.size();
-	}
-
-	/** Depth-first print, so a chain reads as a chain. */
-	private static void printTree(CommandContext<CommandSourceStack> ctx, QuestStore store, Quest quest,
-			int depth, java.util.Set<UUID> printed) {
-		if (depth > 32 || !printed.add(quest.id())) {
-			return;
-		}
-
-		boolean locked = !store.isUnlocked(quest.id());
-
-		MutableComponent msg = Component.empty();
-		msg.append(Component.literal("  ".repeat(Math.max(0, depth - 1))));
-		msg.append(QuestText.treeRow(locked, quest.name(), quest.completedCount(), quest.tasks().size()));
-		ctx.getSource().sendSuccess(() -> msg, false);
-
-		for (Quest child : store.quests()) {
-			if (child.prerequisites().contains(quest.id())) {
-				printTree(ctx, store, child, depth + 1, printed);
-			}
-		}
+		return store.quests().size();
 	}
 
 	// --- leaderboard ---------------------------------------------------------
@@ -634,7 +346,7 @@ public final class QuestCommands {
 
 		for (Quest quest : store.quests()) {
 			MutableComponent head = Component.empty();
-			head.append(QuestText.treeRow(!store.isUnlocked(quest.id()), quest.name(),
+			head.append(QuestText.treeRow(quest.name(),
 					quest.completedCount(), quest.tasks().size()));
 			head.append(Component.literal(" \u00a78[" + quest.id() + "]"));
 			ctx.getSource().sendSuccess(() -> head, false);

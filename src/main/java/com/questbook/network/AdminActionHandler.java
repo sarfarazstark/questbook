@@ -3,7 +3,6 @@ package com.questbook.network;
 import com.questbook.QuestBook;
 import com.questbook.data.Quest;
 import com.questbook.data.QuestStore;
-import com.questbook.data.Reward;
 import com.questbook.data.Task;
 import com.questbook.storage.QuestSavedData;
 import com.questbook.tracking.Quests;
@@ -59,10 +58,6 @@ public final class AdminActionHandler {
 			case ADD_TASK -> handleAddTask(server, data, payload);
 			case UPDATE_TASK -> handleUpdateTask(server, data, payload);
 			case RENAME_GOAL -> handleRenameQuest(server, data, payload);
-			case SET_QUEST_REWARD -> handleSetQuestReward(server, data, payload);
-			case SET_TASK_REWARD -> handleSetTaskReward(server, data, payload);
-			case ADD_PREREQUISITE -> handleAddPrerequisite(server, data, payload);
-			case REMOVE_PREREQUISITE -> handleRemovePrerequisite(server, data, payload);
 		}
 	}
 	private static void handleCreateQuest(MinecraftServer server, QuestSavedData data, AdminActionPayload payload) {
@@ -158,38 +153,6 @@ public final class AdminActionHandler {
 		QuestNetworking.syncAll(server);
 		syncAllAdmins(server, data);
 	}
-	private static void handleSetQuestReward(MinecraftServer server, QuestSavedData data, AdminActionPayload payload) {
-		if (payload.reward().isPresent() && !payload.reward().get().isSane()) {
-			return;
-		}
-		data.store().quest(payload.questId()).ifPresent(q -> data.setReward(q, payload.reward()));
-		QuestNetworking.syncAll(server);
-		syncAllAdmins(server, data);
-	}
-
-	private static void handleSetTaskReward(MinecraftServer server, QuestSavedData data, AdminActionPayload payload) {
-		if (payload.reward().isPresent() && !payload.reward().get().isSane()) {
-			return;
-		}
-		data.setStore(data.store().updateTask(payload.questId(), payload.taskId(), t -> t.withReward(payload.reward())));
-		QuestNetworking.syncAll(server);
-		syncAllAdmins(server, data);
-	}
-
-	private static void handleAddPrerequisite(MinecraftServer server, QuestSavedData data, AdminActionPayload payload) {
-		if (payload.prerequisiteId().equals(payload.questId())) {
-			return;
-		}
-		data.setStore(data.store().updateQuest(payload.questId(), g -> g.withPrerequisite(payload.prerequisiteId())));
-		QuestNetworking.syncAll(server);
-		syncAllAdmins(server, data);
-	}
-
-	private static void handleRemovePrerequisite(MinecraftServer server, QuestSavedData data, AdminActionPayload payload) {
-		data.setStore(data.store().updateQuest(payload.questId(), g -> g.withoutPrerequisite(payload.prerequisiteId())));
-		QuestNetworking.syncAll(server);
-		syncAllAdmins(server, data);
-	}
 
 	public static void syncAllAdmins(MinecraftServer server, QuestSavedData data) {
 		for (ServerPlayer player : server.getPlayerList().getPlayers()) {
@@ -229,26 +192,13 @@ public final class AdminActionHandler {
 						task.count(),
 						task.isComplete(),
 						task.assignee(),
-						assigneeName,
-						task.reward()
+						assigneeName
 				));
-			}
-
-			// Ids ride along with the names: the admin screen removes a prerequisite
-			// by id, and resolving names client-side would need a store it does not
-			// have.
-			List<String> prerequisiteNames = new ArrayList<>();
-			for (UUID pre : quest.prerequisites()) {
-				data.store().quest(pre).ifPresent(p -> prerequisiteNames.add(p.name()));
 			}
 
 			questEntries.add(new AdminSyncPayload.AdminQuestEntry(
 					quest.id(),
 					quest.name(),
-					data.reward(quest),
-					prerequisiteNames,
-					quest.prerequisites(),
-					!data.store().isUnlocked(quest.id()),
 					taskEntries
 			));
 		}

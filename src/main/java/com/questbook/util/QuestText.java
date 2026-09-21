@@ -63,15 +63,6 @@ public final class QuestText {
 		return msg;
 	}
 
-	public static Component rewardGranted(String questName, String rewardDesc) {
-		MutableComponent msg = tag("REWARD", 0xAB47BC, 0x42A5F5);
-		msg.append(Component.literal("\u00a77Granted "));
-		msg.append(chromatic(rewardDesc, 0x80DEEA, 0x81C784));
-		msg.append(Component.literal("\u00a77 for \u00a7f"));
-		msg.append(chromatic(questName, 0xFFD54F, 0xFFA726));
-		return msg;
-	}
-
 	public static String displayName(String itemId) {
 		String path = itemId.contains(":") ? itemId.substring(itemId.indexOf(':') + 1) : itemId;
 		path = path.replace('_', ' ');
@@ -136,30 +127,13 @@ public final class QuestText {
 		return msg;
 	}
 
-	/** A quest line in {@code /questbook tree}, marked locked when it is. */
-	public static Component treeRow(boolean locked, String name, int done, int total) {
+	/** A quest line in {@code /questbook tree}. */
+	public static Component treeRow(String name, int done, int total) {
 		MutableComponent msg = Component.empty();
-		msg.append(Component.literal(locked ? "  \u00a78\u25cb " : "  \u00a7a\u25cf ")
-				.withStyle(s -> s.withColor(locked ? 0x616161 : 0x66BB6A)));
-
-		if (locked) {
-			msg.append(Component.literal("\u00a78" + name + " \u00a78[locked]"));
-		} else {
-			msg.append(chromatic(name, 0x4FC3F7, 0x81C784));
-			msg.append(Component.literal("\u00a77  " + done + "/" + total));
-		}
+		msg.append(Component.literal("  \u00a7a\u25cf ").withStyle(s -> s.withColor(0x66BB6A)));
+		msg.append(chromatic(name, 0x4FC3F7, 0x81C784));
+		msg.append(Component.literal("\u00a77  " + done + "/" + total));
 
 		return msg;
-	}
-
-	/** A reward summary, e.g. {@code 5x Diamond}. */
-	public static Component rewardSummary(String kind, String value, int amount) {
-		String text = switch (kind) {
-			case "ITEM" -> amount + "x " + displayName(value);
-			case "XP" -> amount + " Levels XP";
-			default -> value;
-		};
-
-		return chromatic(text, 0x80DEEA, 0x81C784);
 	}
 }

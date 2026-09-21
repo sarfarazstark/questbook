@@ -2,11 +2,9 @@ package com.questbook.client.gui;
 
 import com.questbook.QuestBook;
 import com.questbook.client.ClientAdminState;
-import com.questbook.data.Reward;
 import com.questbook.data.Task;
 import com.questbook.network.AdminActionPayload;
 import com.questbook.network.AdminSyncPayload;
-import com.questbook.util.QuestText;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.EditBox;
@@ -797,21 +795,7 @@ public final class AdminQuestScreen extends Screen {
 		String prog = done + "/" + quest.tasks().size() + " tasks complete";
 		g.text(font, prog, x, hy + HDR_PROGRESS_Y, done == quest.tasks().size() && !quest.tasks().isEmpty() ? TEXT_GREEN : TEXT_MUTED, false);
 
-		Optional<Reward> reward = quest.reward();
-		String rewardText = reward.isPresent()
-				? "Reward: " + QuestText.rewardSummary(reward.get().kind().name(), reward.get().value(), reward.get().amount()).getString()
-				: "Reward: none";
-		g.text(font, font.plainSubstrByWidth(rewardText, w), x, hy + HDR_REWARD_Y, reward.isPresent() ? TEXT_GOLD : TEXT_DIM, false);
-
-		String prereqText = quest.prerequisiteNames().isEmpty()
-				? "Prerequisites: none"
-				: "Prerequisites: " + String.join(", ", quest.prerequisiteNames());
-		g.text(font, font.plainSubstrByWidth(prereqText, w), x, hy + HDR_PREREQ_Y, TEXT_DIM, false);
-
-		if (quest.locked()) {
-			g.text(font, font.plainSubstrByWidth("Locked until prerequisites complete", w), x, hy + HDR_LOCKED_Y, TEXT_RED, false);
-		}
-		int ruleY = hy + (quest.locked() ? HDR_LOCKED_Y : HDR_PREREQ_Y) + HDR_RULE_GAP;
+		int ruleY = hy + HDR_PROGRESS_Y + HDR_RULE_GAP;
 		g.fill(x, ruleY, x + w, ruleY + HDR_RULE_H, PANEL_BORDER);
 
 		// Tasks — clipped so a row near the bottom edge cannot bleed past the pane.
@@ -866,9 +850,6 @@ public final class AdminQuestScreen extends Screen {
 	 */
 	private static final int HDR_TITLE_Y = 1;
 	private static final int HDR_PROGRESS_Y = 12;
-	private static final int HDR_REWARD_Y = 23;
-	private static final int HDR_PREREQ_Y = 34;
-	private static final int HDR_LOCKED_Y = 45;
 	/** Glyph height of the 9px font, used to keep rules clear of descenders. */
 	private static final int FONT_H = 9;
 	/** Gap between the last header line's baseline and the divider rule. */
@@ -880,8 +861,7 @@ public final class AdminQuestScreen extends Screen {
 
 	/** Height of the right-pane header block; shared by render and click hit-testing. */
 	private int rightHeaderHeight(AdminSyncPayload.AdminQuestEntry quest) {
-		int lastLineY = quest.locked() ? HDR_LOCKED_Y : HDR_PREREQ_Y;
-		int ruleBottom = lastLineY + HDR_RULE_GAP + HDR_RULE_H;
+		int ruleBottom = HDR_PROGRESS_Y + HDR_RULE_GAP + HDR_RULE_H;
 		return ruleBottom + HDR_RULE_TO_TASKS;
 	}
 

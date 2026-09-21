@@ -76,12 +76,6 @@ public final class ProgressTracker {
 		List<String> completedQuestNames = new ArrayList<>();
 
 		for (Quest quest : store.quests()) {
-			// A locked quest's tasks accept nothing, so a player who has not yet
-			// finished the prerequisite chain cannot bank progress early.
-			if (!store.isUnlocked(quest.id())) {
-				continue;
-			}
-
 			for (Task task : quest.tasks()) {
 				// The assignee rule: nobody else's pickups count.
 				if (!task.assignee().equals(playerId) || task.isComplete()) {

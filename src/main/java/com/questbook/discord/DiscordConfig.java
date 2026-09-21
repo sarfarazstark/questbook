@@ -32,7 +32,6 @@ public final class DiscordConfig {
 	private String webhookUrl = "";
 	private boolean announceQuests = true;
 	private boolean announceTasks = false;
-	private boolean announceRewards = true;
 
 	public static synchronized DiscordConfig get() {
 		if (cached == null) {
@@ -93,7 +92,7 @@ public final class DiscordConfig {
 
 	/** Whether a webhook is configured and at least one event is enabled. */
 	public boolean enabled() {
-		return !webhookUrl.isBlank() && (announceQuests || announceTasks || announceRewards);
+		return !webhookUrl.isBlank() && (announceQuests || announceTasks);
 	}
 
 	public String webhookUrl() {
@@ -108,10 +107,6 @@ public final class DiscordConfig {
 		return announceTasks;
 	}
 
-	public boolean announceRewards() {
-		return announceRewards;
-	}
-
 	public void setWebhookUrl(String url) {
 		this.webhookUrl = url == null ? "" : url.trim();
 	}
@@ -124,10 +119,6 @@ public final class DiscordConfig {
 		this.announceTasks = value;
 	}
 
-	public void setAnnounceRewards(boolean value) {
-		this.announceRewards = value;
-	}
-
 	/** One-line summary, for {@code /questbook discord status}. */
 	public String describe() {
 		if (webhookUrl.isBlank()) {
@@ -135,6 +126,6 @@ public final class DiscordConfig {
 		}
 
 		return (enabled() ? "enabled" : "all events off")
-				+ " quests=" + announceQuests + " tasks=" + announceTasks + " rewards=" + announceRewards;
+				+ " quests=" + announceQuests + " tasks=" + announceTasks;
 	}
 }

@@ -28,13 +28,9 @@ public final class QuestModelCheck {
 		checkQuestCompletion();
 		checkProgressClamp();
 		checkTaskReplacement();
-		checkReward();
 		checkPinning();
 		checkOrderPreserved();
 		checkQuestOrderPreserved();
-		checkPrerequisites();
-		checkMissingPrerequisite();
-		checkTaskReward();
 		checkPlayerStats();
 		checkAssigneeNamePersists();
 		checkBackwardCompatibleDocument();
@@ -107,19 +103,6 @@ public final class QuestModelCheck {
 		expect("remove drops the task", removed.tasks().isEmpty());
 	}
 
-	/** Reward substitution and validation. */
-	private static void checkReward() {
-		Reward command = Reward.command("tell %player% gg");
-		expect("command substitutes the player", command.commandFor("Alex").orElse("").equals("tell Alex gg"));
-
-		Reward item = Reward.item("minecraft:diamond", 3);
-		expect("item has no command", item.commandFor("Alex").isEmpty());
-		expect("item reward is sane", item.isSane());
-		expect("zero-amount item is not sane", !Reward.item("minecraft:diamond", 0).isSane());
-		expect("blank item is not sane", !Reward.item("", 1).isSane());
-		expect("newline command is not sane", !Reward.command("say hi\nsay bye").isSane());
-		expect("zero xp is not sane", !Reward.xp(0).isSane());
-	}
 
 	/** Pinning is per task, and survives the immutable update chain. */
 	private static void checkPinning() {
@@ -234,93 +217,8 @@ public final class QuestModelCheck {
 				store.withQuest(fourth).quests().get(3).id().equals(fourth.id()));
 	}
 
-	/**
-	 * A quest is locked until every prerequisite is complete.
-	 *
-	 * <p>Prerequisite ids point at quests that may no longer exist. A dangling
-	 * prerequisite must not lock a quest forever, because deleting a quest is a
-	 * legitimate operation and an operator should not have to clean up every
-	 * chain that pointed at it.
-	 */
-	private static void checkPrerequisites() {
-		UUID alex = UUID.randomUUID();
 
-		Quest gather = Quest.create("Gather Wood").withTask(Task.create("minecraft:oak_log", 1, alex));
-		Quest build = Quest.create("Build a Cottage");
-		UUID dangling = UUID.randomUUID();
 
-		Quest locked = build.withPrerequisite(gather.id()).withPrerequisite(dangling);
-		QuestStore store = QuestStore.EMPTY.withQuest(gather).withQuest(locked);
-
-		expect("a quest with a prerequisite is locked", !store.isUnlocked(locked.id()));
-
-		// Completing the prerequisite unlocks it. The dangling one is ignored, so
-		// this is the whole story.
-		QuestStore satisfied = store.updateTask(gather.id(), gather.tasks().get(0).id(),
-				t -> t.advance(1));
-
-		expect("completing the prerequisite unlocks", satisfied.isUnlocked(locked.id()));
-
-		// Dropping one prerequisite leaves the dangling one, which still does not
-		// block — an operator is never stuck cleaning up a deleted node.
-		QuestStore dropped = store.withQuest(store.quest(locked.id()).get()
-				.withoutPrerequisite(gather.id()));
-
-		expect("dropping one prerequisite leaves the other",
-				dropped.quest(locked.id()).get().prerequisites().size() == 1);
-		expect("dropping the prerequisite unlocks", dropped.isUnlocked(locked.id()));
-
-		QuestStore cleared = dropped.withQuest(dropped.quest(locked.id()).get()
-				.withoutPrerequisite(dangling));
-
-		expect("prerequisites list can be emptied",
-				cleared.quest(locked.id()).get().prerequisites().isEmpty());
-	}
-
-	/** A prerequisite pointing at a quest that was deleted counts as satisfied. */
-	private static void checkMissingPrerequisite() {
-		Quest solo = Quest.create("Free");
-		QuestStore empty = QuestStore.EMPTY.withQuest(solo);
-
-		expect("a quest with no prerequisites is unlocked", empty.isUnlocked(solo.id()));
-
-		Quest orphan = solo.withPrerequisite(UUID.randomUUID());
-		QuestStore store = empty.withQuest(orphan);
-
-		expect("a prerequisite that does not exist is treated as satisfied",
-				store.isUnlocked(orphan.id()));
-	}
-
-	/** A task reward rides along with the task, and only pays the assignee. */
-	private static void checkTaskReward() {
-		UUID alex = UUID.randomUUID();
-		Task plain = Task.create("minecraft:oak_log", 4, alex);
-
-		expect("a new task has no reward", plain.reward().isEmpty());
-
-		Task paid = plain.withReward(Optional.of(Reward.item("minecraft:diamond", 1)));
-
-		expect("withReward sets the reward", paid.reward().isPresent());
-		expect("the reward is the one that was set",
-				paid.reward().get().value().equals("minecraft:diamond"));
-
-		// Every mutation that rebuilds a Task must carry the reward through, or it
-		// silently disappears the first time the task is advanced.
-		expect("advance keeps the reward", paid.advance(1).reward().isPresent());
-		expect("withProgress keeps the reward", paid.withProgress(2).reward().isPresent());
-		expect("withAssignee keeps the reward", paid.withAssignee(alex, "Alex").reward().isPresent());
-		expect("withPinned keeps the reward", paid.withPinned(true).reward().isPresent());
-		expect("updateTask through the quest keeps the reward",
-				Quest.create("Cottage").withTask(paid).updateTask(paid.id(), t -> t.advance(1))
-						.tasks().get(0).reward().isPresent());
-
-		expect("withReward(empty) clears", plain.withReward(Optional.empty()).reward().isEmpty());
-
-		// The store round-trip must keep it too.
-		Quest quest = Quest.create("Cottage").withTask(paid);
-		Task after = QuestStore.EMPTY.withQuest(quest).quests().get(0).tasks().get(0);
-		expect("store keeps the task reward", after.reward().isPresent());
-	}
 
 	/** Leaderboard points and ranking. */
 	private static void checkPlayerStats() {
@@ -395,9 +293,6 @@ public final class QuestModelCheck {
 		expect("advance keeps the name", task.advance(1).assigneeName().equals("Alex"));
 		expect("withProgress keeps the name", task.withProgress(1).assigneeName().equals("Alex"));
 		expect("withPinned keeps the name", task.withPinned(true).assigneeName().equals("Alex"));
-		expect("withReward keeps the name",
-				task.withReward(Optional.of(Reward.item("minecraft:diamond", 1)))
-						.assigneeName().equals("Alex"));
 
 		// Reassignment records the new name at the same moment as the new id, so the
 		// two cannot disagree about who the assignee was.
@@ -429,58 +324,51 @@ public final class QuestModelCheck {
 	}
 
 	/**
-	 * A world saved before per-task rewards, prerequisites and stats existed.
+	 * A world saved before the reward and prerequisite systems were removed.
 	 *
-	 * <p>All three fields are {@code optionalFieldOf} with defaults, so the old
-	 * disk form decodes unchanged: quests survive, nothing is lost, and no manual
-	 * migration is needed. This check is the contract that keeps that true.
+	 * <p>Those keys are no longer in the codec, so they are ignored on load rather
+	 * than rejected, and they stop being written. The quest and task data around
+	 * them must survive untouched.
 	 */
 	private static void checkBackwardCompatibleDocument() {
 		UUID alex = UUID.randomUUID();
 		Quest quest = Quest.create("Gather Wood").withTask(Task.create("minecraft:oak_log", 2, alex));
-		String questId = quest.id().toString();
-		String taskId = quest.tasks().get(0).id().toString();
 
-		// The pre-feature form: quests, rewards and paid only. No prerequisites, no
-		// task reward, no paidTasks, no stats. UUIDs are written the way
+		// A save from when rewards and prerequisites existed. UUIDs are written the way
 		// UUIDUtil.CODEC reads them, as an int pair rather than a dashed string.
 		String legacy = "{\"goals\":[{\"id\":" + asUuidArray(quest.id()) + ",\"name\":\"Gather Wood\","
+				+ "\"prerequisites\":[" + asUuidArray(UUID.randomUUID()) + "],"
 				+ "\"tasks\":[{\"id\":" + asUuidArray(quest.tasks().get(0).id())
 				+ ",\"item\":\"minecraft:oak_log\","
-				+ "\"count\":2,\"assignee\":" + asUuidArray(alex) + "}]}],"
-				+ "\"rewards\":{},\"paid\":[]}";
+				+ "\"count\":2,\"assignee\":" + asUuidArray(alex) + ","
+				+ "\"reward\":{\"kind\":\"XP\",\"value\":\"\",\"amount\":5}}]}],"
+				+ "\"rewards\":{},\"paid\":[],\"paidTasks\":[]}";
 
 		JsonElement parsed = JsonParser.parseString(legacy);
 		DataResult<QuestSavedData.Document> decoded =
 				QuestSavedData.Document.CODEC.parse(JsonOps.INSTANCE, parsed);
 
-		expect("a legacy document decodes", decoded.result().isPresent());
+		expect("an old document with reward keys decodes", decoded.result().isPresent());
 
 		if (decoded.error().isPresent()) {
 			System.out.println("       decode error: " + decoded.error().get().message());
 		}
 
 		decoded.result().ifPresent(document -> {
-			expect("legacy quests survive", document.quests().size() == 1);
-			expect("legacy tasks survive", document.quests().get(0).tasks().size() == 1);
-			expect("legacy tasks have no reward",
-					document.quests().get(0).tasks().get(0).reward().isEmpty());
-			expect("legacy prerequisites default to empty",
-					document.quests().get(0).prerequisites().isEmpty());
-			expect("legacy paidTasks defaults to empty", document.paidTasks().isEmpty());
-			expect("legacy stats default to empty", document.stats().isEmpty());
+			expect("old quests survive", document.quests().size() == 1);
+			expect("old tasks survive", document.quests().get(0).tasks().size() == 1);
+			expect("old task keeps its count",
+					document.quests().get(0).tasks().get(0).count() == 2);
+			expect("old stats default to empty", document.stats().isEmpty());
 		});
 
-		// A malformed key must not make the world unreadable.
+		// Stats are all that is left of the document beyond the quests themselves.
 		QuestSavedData data = new QuestSavedData();
 		data.recordTaskCompletion(alex);
 		data.recordQuestCompletion(alex);
-		data.markTaskPaid(quest.tasks().get(0).id());
 
 		expect("stats are recorded", data.statsOf(alex).points() == PlayerStats.TASK_POINTS
 				+ PlayerStats.GOAL_POINTS);
-		expect("task is marked paid", data.isTaskPaid(quest.tasks().get(0).id()));
-		expect("an unpaid task is not paid", !data.isTaskPaid(UUID.randomUUID()));
 	}
 
 	/** A UUID in the four-int form {@code UUIDUtil.CODEC} reads. */

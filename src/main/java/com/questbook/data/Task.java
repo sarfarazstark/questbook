@@ -5,7 +5,6 @@ import com.mojang.serialization.codecs.RecordCodecBuilder;
 
 import net.minecraft.core.UUIDUtil;
 
-import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -15,13 +14,9 @@ import java.util.UUID;
  * player, and a player may hold many tasks — so a single {@code assignee} field
  * is enough and no join table is needed.
  *
- * <p>A task may carry its own reward. That reward is granted to the assignee and
- * nobody else, the instant this task completes. It is deliberately separate from
- * the quest reward, which is shared by everyone holding a task in the quest.
- *
- * @param id       stable identity, generated on creation
- * @param itemId   registry id of the item to collect, e.g. {@code minecraft:oak_log}
- * @param count    how many are required; always >= 1
+ * @param id           stable identity, generated on creation
+ * @param itemId       registry id of the item to collect, e.g. {@code minecraft:oak_log}
+ * @param count        how many are required; always >= 1
  * @param assignee     the only player whose pickups count toward this task
  * @param assigneeName the assignee's name as it was when assigned. Stored rather than
  *                     looked up because a name is not derivable from a UUID once the
@@ -32,10 +27,9 @@ import java.util.UUID;
  * @param pinned       whether the assignee pinned this task to their HUD. Per-task is
  *                     correct rather than per-player: a task has exactly one
  *                     assignee, so a pin belongs to that pairing.
- * @param reward       granted to the assignee alone on completion; absent means none
  */
 public record Task(UUID id, String itemId, int count, UUID assignee, String assigneeName, int progress,
-		boolean pinned, Optional<Reward> reward) {
+		boolean pinned) {
 	/** Disk form. Field names are the on-disk keys, so rename them only with a data fix. */
 	public static final Codec<Task> CODEC = RecordCodecBuilder.create(instance -> instance.group(
 			UUIDUtil.CODEC.fieldOf("id").forGetter(Task::id),
@@ -46,8 +40,7 @@ public record Task(UUID id, String itemId, int count, UUID assignee, String assi
 			// tasks fall back to a live lookup until next re-assigned.
 			Codec.STRING.optionalFieldOf("assignee_name", "").forGetter(Task::assigneeName),
 			Codec.INT.optionalFieldOf("progress", 0).forGetter(Task::progress),
-			Codec.BOOL.optionalFieldOf("pinned", false).forGetter(Task::pinned),
-			Reward.CODEC.optionalFieldOf("reward").forGetter(Task::reward)
+			Codec.BOOL.optionalFieldOf("pinned", false).forGetter(Task::pinned)
 	).apply(instance, Task::new));
 
 	/** A task nobody has been assigned yet. */
@@ -65,7 +58,7 @@ public record Task(UUID id, String itemId, int count, UUID assignee, String assi
 	}
 
 	public static Task create(String itemId, int count, UUID assignee, String assigneeName) {
-		return new Task(UUID.randomUUID(), itemId, count, assignee, assigneeName, 0, false, Optional.empty());
+		return new Task(UUID.randomUUID(), itemId, count, assignee, assigneeName, 0, false);
 	}
 
 	public boolean isUnassigned() {
@@ -87,7 +80,7 @@ public record Task(UUID id, String itemId, int count, UUID assignee, String assi
 	}
 
 	public Task withProgress(int newProgress) {
-		return new Task(id, itemId, count, assignee, assigneeName, Math.max(0, newProgress), pinned, reward);
+		return new Task(id, itemId, count, assignee, assigneeName, Math.max(0, newProgress), pinned);
 	}
 
 	/**
@@ -96,7 +89,7 @@ public record Task(UUID id, String itemId, int count, UUID assignee, String assi
 	 */
 	public Task withAssignee(UUID newAssignee, String newAssigneeName) {
 		return new Task(id, itemId, count, newAssignee, newAssigneeName == null ? "" : newAssigneeName,
-				progress, pinned, reward);
+				progress, pinned);
 	}
 
 	/**
@@ -109,15 +102,11 @@ public record Task(UUID id, String itemId, int count, UUID assignee, String assi
 			throw new IllegalArgumentException("count must be >= 1, got " + newCount);
 		}
 		return new Task(id, itemId, newCount, newAssignee,
-				newAssigneeName == null ? "" : newAssigneeName, Math.min(progress, newCount), pinned, reward);
+				newAssigneeName == null ? "" : newAssigneeName, Math.min(progress, newCount), pinned);
 	}
 
 	public Task withPinned(boolean newPinned) {
-		return new Task(id, itemId, count, assignee, assigneeName, progress, newPinned, reward);
-	}
-
-	public Task withReward(Optional<Reward> newReward) {
-		return new Task(id, itemId, count, assignee, assigneeName, progress, pinned, newReward);
+		return new Task(id, itemId, count, assignee, assigneeName, progress, newPinned);
 	}
 
 	/** Adds to progress, clamped at the requirement. */

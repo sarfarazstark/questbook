@@ -1,7 +1,6 @@
 package com.questbook.network;
 
 import com.questbook.QuestBook;
-import com.questbook.data.Reward;
 
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
@@ -9,7 +8,6 @@ import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -32,7 +30,8 @@ public record AdminSyncPayload(List<AdminQuestEntry> quests, List<PlayerEntry> p
 		}
 	}
 
-	public record AdminTaskEntry(UUID id, String itemId, String label, int have, int need, boolean complete, UUID assignee, String assigneeName, Optional<Reward> reward) {
+	public record AdminTaskEntry(UUID id, String itemId, String label, int have, int need, boolean complete,
+			UUID assignee, String assigneeName) {
 		static AdminTaskEntry read(FriendlyByteBuf buf) {
 			return new AdminTaskEntry(
 					buf.readUUID(),
@@ -42,8 +41,7 @@ public record AdminSyncPayload(List<AdminQuestEntry> quests, List<PlayerEntry> p
 					buf.readVarInt(),
 					buf.readBoolean(),
 					buf.readUUID(),
-					buf.readUtf(),
-					Reward.readOptionalWire(buf)
+					buf.readUtf()
 			);
 		}
 
@@ -56,21 +54,14 @@ public record AdminSyncPayload(List<AdminQuestEntry> quests, List<PlayerEntry> p
 			buf.writeBoolean(complete);
 			buf.writeUUID(assignee);
 			buf.writeUtf(assigneeName);
-			Reward.writeOptionalWire(buf, reward);
 		}
 	}
 
-	public record AdminQuestEntry(UUID id, String name, Optional<Reward> reward,
-			List<String> prerequisiteNames, List<UUID> prerequisiteIds, boolean locked,
-			List<AdminTaskEntry> tasks) {
+	public record AdminQuestEntry(UUID id, String name, List<AdminTaskEntry> tasks) {
 		static AdminQuestEntry read(FriendlyByteBuf buf) {
 			return new AdminQuestEntry(
 					buf.readUUID(),
 					buf.readUtf(),
-					Reward.readOptionalWire(buf),
-					buf.readCollection(ArrayList::new, FriendlyByteBuf::readUtf),
-					buf.readCollection(ArrayList::new, b -> b.readUUID()),
-					buf.readBoolean(),
 					buf.readCollection(ArrayList::new, AdminTaskEntry::read)
 			);
 		}
@@ -78,10 +69,6 @@ public record AdminSyncPayload(List<AdminQuestEntry> quests, List<PlayerEntry> p
 		void write(FriendlyByteBuf buf) {
 			buf.writeUUID(id);
 			buf.writeUtf(name);
-			Reward.writeOptionalWire(buf, reward);
-			buf.writeCollection(prerequisiteNames, FriendlyByteBuf::writeUtf);
-			buf.writeCollection(prerequisiteIds, (out, id) -> out.writeUUID(id));
-			buf.writeBoolean(locked);
 			buf.writeCollection(tasks, (out, entry) -> entry.write(out));
 		}
 	}

@@ -53,26 +53,6 @@ public record QuestStore(List<Quest> quests) {
 		return new QuestStore(next);
 	}
 
-	/**
-	 * Whether {@code questId} accepts progress: every prerequisite it names must be
-	 * complete.
-	 *
-	 * <p>A prerequisite naming a quest that no longer exists counts as satisfied.
-	 * The alternative is a quest locked forever, unfixable from in-game because the
-	 * UUID needed to repair it is gone. An unknown prerequisite is an admin who
-	 * deleted a node, not a puzzle.
-	 */
-	public boolean isUnlocked(UUID questId) {
-		Optional<Quest> found = quest(questId);
-
-		if (found.isEmpty()) {
-			return false;
-		}
-
-		return found.get().prerequisites().stream()
-				.allMatch(pre -> quest(pre).map(Quest::isComplete).orElse(true));
-	}
-
 	/** Applies {@code mapper} to one quest; no-op if it is absent. */
 	public QuestStore updateQuest(UUID questId, java.util.function.UnaryOperator<Quest> mapper) {
 		return quest(questId).map(g -> withQuest(mapper.apply(g))).orElse(this);

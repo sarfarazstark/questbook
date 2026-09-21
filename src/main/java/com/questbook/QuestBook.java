@@ -2,7 +2,6 @@ package com.questbook;
 
 import com.questbook.command.QuestCommands;
 import com.questbook.network.QuestNetworking;
-import com.questbook.tracking.RewardGranter;
 
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
@@ -12,7 +11,7 @@ import net.minecraft.resources.Identifier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/** Mod entrypoint: registers commands, networking and the reward tick. */
+/** Mod entrypoint: registers commands and networking. */
 public class QuestBook implements ModInitializer {
 	public static final String MOD_ID = "questbook";
 
@@ -28,8 +27,6 @@ public class QuestBook implements ModInitializer {
 
 		CommandRegistrationCallback.EVENT.register((dispatcher, registry, environment) ->
 				QuestCommands.register(dispatcher));
-
-		RewardGranter.register();
 
 		LOGGER.info("Quest Book loaded");
 	}

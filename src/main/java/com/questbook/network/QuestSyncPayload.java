@@ -2,7 +2,6 @@ package com.questbook.network;
 
 import com.questbook.QuestBook;
 import com.questbook.data.Quest;
-import com.questbook.data.Reward;
 import com.questbook.data.Task;
 import com.questbook.storage.QuestSavedData;
 
@@ -47,27 +46,17 @@ public record QuestSyncPayload(List<QuestEntry> quests) implements CustomPacketP
 	/**
 	 * One quest, flattened for the wire.
 	 *
-	 * @param name              display name
-	 * @param reward            granted to everyone holding a task in this quest when it completes
-	 * @param prerequisiteNames display names of the quests that must complete first
-	 * @param locked            whether this quest currently refuses progress
-	 * @param tasks             this player's tasks in the quest, in display order
+	 * @param name  display name
+	 * @param tasks this player's tasks in the quest, in display order
 	 */
-	public record QuestEntry(String name, Optional<Reward> reward, List<String> prerequisiteNames,
-			boolean locked, List<TaskEntry> tasks) {
+	public record QuestEntry(String name, List<TaskEntry> tasks) {
 		static QuestEntry read(FriendlyByteBuf buf) {
 			return new QuestEntry(buf.readUtf(),
-					Reward.readOptionalWire(buf),
-					buf.readCollection(ArrayList::new, FriendlyByteBuf::readUtf),
-					buf.readBoolean(),
 					buf.readCollection(ArrayList::new, TaskEntry::read));
 		}
 
 		void write(FriendlyByteBuf buf) {
 			buf.writeUtf(name);
-			Reward.writeOptionalWire(buf, reward);
-			buf.writeCollection(prerequisiteNames, FriendlyByteBuf::writeUtf);
-			buf.writeBoolean(locked);
 			buf.writeCollection(tasks, (out, entry) -> entry.write(out));
 		}
 	}
@@ -81,14 +70,12 @@ public record QuestSyncPayload(List<QuestEntry> quests) implements CustomPacketP
 	 * @param need     the requirement
 	 * @param complete whether the task is done
 	 * @param pinned   whether this player has pinned it to their HUD
-	 * @param reward   granted to the assignee alone when this task completes
 	 */
 	public record TaskEntry(String id, String label, int have, int need, boolean complete,
-			boolean pinned, Optional<Reward> reward) {
+			boolean pinned) {
 		static TaskEntry read(FriendlyByteBuf buf) {
 			return new TaskEntry(buf.readUtf(), buf.readUtf(), buf.readVarInt(),
-					buf.readVarInt(), buf.readBoolean(), buf.readBoolean(),
-					Reward.readOptionalWire(buf));
+					buf.readVarInt(), buf.readBoolean(), buf.readBoolean());
 		}
 
 		void write(FriendlyByteBuf buf) {
@@ -98,7 +85,6 @@ public record QuestSyncPayload(List<QuestEntry> quests) implements CustomPacketP
 			buf.writeVarInt(need);
 			buf.writeBoolean(complete);
 			buf.writeBoolean(pinned);
-			Reward.writeOptionalWire(buf, reward);
 		}
 	}
 
@@ -120,14 +106,7 @@ public record QuestSyncPayload(List<QuestEntry> quests) implements CustomPacketP
 		buf.writeCollection(quests, (out, entry) -> entry.write(out));
 	}
 
-	/**
-	 * Builds the payload for one player.
-	 *
-	 * <p>Takes the whole {@link QuestSavedData} rather than a quest list, because
-	 * a quest's reward lives in the data's reward map and its prerequisite names
-	 * need the store to resolve UUIDs to names. Neither is reachable from a
-	 * {@link Quest} alone, which is why this signature changed.
-	 */
+	/** Builds the payload for one player. */
 	public static QuestSyncPayload forPlayer(QuestSavedData data, UUID player) {
 		List<QuestEntry> entries = new ArrayList<>();
 
@@ -142,19 +121,10 @@ public record QuestSyncPayload(List<QuestEntry> quests) implements CustomPacketP
 
 			for (Task task : mine) {
 				tasks.add(new TaskEntry(task.id().toString(), displayName(task.itemId()),
-						task.cappedProgress(), task.count(), task.isComplete(),
-						task.pinned(), task.reward()));
+						task.cappedProgress(), task.count(), task.isComplete(), task.pinned()));
 			}
 
-			// Resolved here, not on the client: the client has no registry or store,
-			// so a prerequisite it could not name would be an unreadable row.
-			List<String> prerequisiteNames = new ArrayList<>();
-			for (UUID pre : quest.prerequisites()) {
-				data.store().quest(pre).ifPresent(p -> prerequisiteNames.add(p.name()));
-			}
-
-			entries.add(new QuestEntry(quest.name(), data.reward(quest), prerequisiteNames,
-					!data.store().isUnlocked(quest.id()), tasks));
+			entries.add(new QuestEntry(quest.name(), tasks));
 		}
 
 		return new QuestSyncPayload(entries);

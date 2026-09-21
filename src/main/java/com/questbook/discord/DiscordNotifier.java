@@ -66,16 +66,6 @@ public final class DiscordNotifier {
 				0x1E88E5);
 	}
 
-	/** A reward paid out. */
-	public static void rewardGranted(String questName, String rewardDescription, int recipientCount) {
-		if (!DiscordConfig.get().announceRewards()) {
-			return;
-		}
-
-		post("Reward granted", rewardDescription + " to " + recipientCount
-				+ (recipientCount == 1 ? " player" : " players") + " for " + questName, 0x8E24AA);
-	}
-
 	/** Fires a payload straight through, for {@code /questbook discord test}. */
 	public static CompletableFuture<Boolean> test() {
 		return post("Quest Book connected", "The webhook is working.", 0x00ACC1);
