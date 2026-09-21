@@ -6,6 +6,9 @@ import com.questbook.data.Task;
 import com.questbook.network.AdminActionPayload;
 import com.questbook.network.AdminSyncPayload;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.Font;
@@ -126,6 +129,8 @@ public final class AdminQuestScreen extends Screen {
 
 	// New Quest Dialog State (Modal)
 	private boolean newQuestDialogOpen = false;
+	/** Dialog committed as a rename of the selected quest instead of a create. */
+	private boolean renameMode = false;
 	private InkField newQuestNameField;
 
 	public AdminQuestScreen() {
@@ -332,8 +337,8 @@ public final class AdminQuestScreen extends Screen {
 		int modalX = (width - modalW) / 2;
 		int modalY = (height - modalH) / 2;
 		newQuestNameField = new InkField(font, modalX + 12, modalY + 30, modalW - 24, 16);
-		newQuestNameField.setHintText("Enter quest name...");
-		newQuestNameField.setMaxLength(64);
+		newQuestNameField.setHintText("Quest name or JSON...");
+		newQuestNameField.setMaxLength(4096);
 		styleField(newQuestNameField);
 		addRenderableWidget(newQuestNameField);
 		newQuestNameField.visible = newQuestDialogOpen;
@@ -520,15 +525,17 @@ public final class AdminQuestScreen extends Screen {
 		String sub = questCount + (questCount == 1 ? " Quest" : " Quests");
 		g.text(font, sub, panelLeft + 86, panelTop + 7, TEXT_MUTED, false);
 
-		// [+ New Quest] Button
-		int newBtnW = font.width("+ New Quest") + 8;
-		int newBtnH = 14;
-		int newBtnX = panelLeft + panelWidth - newBtnW - 22;
-		int newBtnY = panelTop + 4;
-		boolean newHover = mouseX >= newBtnX && mouseX <= newBtnX + newBtnW && mouseY >= newBtnY && mouseY <= newBtnY + newBtnH;
+	// [+ Add Task] Button. Lives in the header: the old bottom-of-pane button
+	// overlapped the last task row, so its clicks opened the edit modal instead.
+	boolean canAdd = selectedQuest() != null;
+	int newBtnW = font.width("+ Add Task") + 8;
+	int newBtnH = 14;
+	int newBtnX = panelLeft + panelWidth - newBtnW - 22;
+	int newBtnY = panelTop + 4;
+	boolean newHover = canAdd && !modalOpen() && mouseX >= newBtnX && mouseX <= newBtnX + newBtnW && mouseY >= newBtnY && mouseY <= newBtnY + newBtnH;
 
-		g.fill(newBtnX, newBtnY, newBtnX + newBtnW, newBtnY + newBtnH, newHover ? BTN_PRIMARY_HOVER : BTN_PRIMARY);
-		g.text(font, "+ New Quest", newBtnX + 4, newBtnY + 3, TEXT_WHITE, false);
+	g.fill(newBtnX, newBtnY, newBtnX + newBtnW, newBtnY + newBtnH, !canAdd ? 0xFF3E3E42 : (newHover ? BTN_PRIMARY_HOVER : BTN_PRIMARY));
+	g.text(font, "+ Add Task", newBtnX + 4, newBtnY + 3, canAdd ? TEXT_WHITE : TEXT_DIM, false);
 
 		// [✕] Close Button
 		int closeX = panelLeft + panelWidth - 14;
@@ -539,29 +546,51 @@ public final class AdminQuestScreen extends Screen {
 
 	// --- LEFT PANE (MASTER LIST) ---------------------------------------------
 
+	/** Height of the [+ New Quest] button pinned to the quest pane's bottom. */
+	private static final int LEFT_ADD_H = 14;
+
+	/** Bottom edge of the quest list: the add button owns the last rows. */
+	private int leftListBottom() {
+		return leftPaneTop + leftPaneHeight - LEFT_ADD_H - 2;
+	}
+
+	private int leftAddButtonY() {
+		return leftPaneTop + leftPaneHeight - LEFT_ADD_H;
+	}
+
+	private int leftAddButtonW() {
+		return leftPaneWidth - 6;
+	}
+
 	private void renderLeftPane(GuiGraphicsExtractor g, int mouseX, int mouseY) {
 		int listTop = leftPaneTop;
-		int listBottom = leftPaneTop + leftPaneHeight;
+		int listBottom = leftListBottom();
 		int y = listTop - (int) leftScroll;
 
 		List<AdminSyncPayload.AdminQuestEntry> quests = ClientAdminState.quests();
 		if (quests.isEmpty()) {
 			int w = leftPaneWidth - 12;
 			g.text(font, font.plainSubstrByWidth("No quests yet.", w), leftPaneLeft + 4, listTop + 8, TEXT_DIM, false);
-			g.text(font, font.plainSubstrByWidth("Click '+ New Quest'.", w), leftPaneLeft + 4, listTop + 20, TEXT_DIM, false);
+			g.text(font, font.plainSubstrByWidth("Use '+ New Quest' below.", w), leftPaneLeft + 4, listTop + 20, TEXT_DIM, false);
 			leftContentHeight = 0;
-			return;
+		} else {
+			// Clip above the add button so cards cannot bleed under it.
+			g.enableScissor(leftPaneLeft, listTop, leftPaneLeft + leftPaneWidth, listBottom);
+			for (AdminSyncPayload.AdminQuestEntry quest : quests) {
+				y = renderQuestCard(g, quest, y, listTop, listBottom, mouseX, mouseY);
+			}
+			g.disableScissor();
+
+			leftContentHeight = (y + (int) leftScroll) - listTop;
+			renderScrollbar(g, leftPaneLeft + leftPaneWidth - 3, listTop, listBottom - listTop, leftContentHeight, leftScroll);
 		}
 
-		// Clip to the pane so cards that start near the bottom edge cannot bleed out.
-		g.enableScissor(leftPaneLeft, listTop, leftPaneLeft + leftPaneWidth, listBottom);
-		for (AdminSyncPayload.AdminQuestEntry quest : quests) {
-			y = renderQuestCard(g, quest, y, listTop, listBottom, mouseX, mouseY);
-		}
-		g.disableScissor();
-
-		leftContentHeight = (y + (int) leftScroll) - listTop;
-		renderScrollbar(g, leftPaneLeft + leftPaneWidth - 3, listTop, listBottom - listTop, leftContentHeight, leftScroll);
+		// [+ New Quest] pinned to the bottom of the quest section, full card width.
+		int addBtnY = leftAddButtonY();
+		int addBtnW = leftAddButtonW();
+		boolean addHover = !modalOpen() && mouseX >= leftPaneLeft && mouseX <= leftPaneLeft + addBtnW && mouseY >= addBtnY && mouseY <= addBtnY + LEFT_ADD_H;
+		g.fill(leftPaneLeft, addBtnY, leftPaneLeft + addBtnW, addBtnY + LEFT_ADD_H, addHover ? BTN_PRIMARY_HOVER : BTN_PRIMARY);
+		g.text(font, "+ New Quest", leftPaneLeft + 5, addBtnY + 3, TEXT_WHITE, false);
 	}
 
 	private int renderQuestCard(GuiGraphicsExtractor g, AdminSyncPayload.AdminQuestEntry quest, int y, int listTop, int listBottom, int mouseX, int mouseY) {
@@ -587,9 +616,14 @@ public final class AdminQuestScreen extends Screen {
 			int progX = delX - 4 - progW;
 			g.text(font, progStr, progX, y + 4, doneCount == quest.tasks().size() && !quest.tasks().isEmpty() ? TEXT_GREEN : TEXT_MUTED, false);
 
-			// Quest Name
-			int nameMaxW = progX - 4 - (cardX + 6);
-			String name = font.plainSubstrByWidth(quest.name(), Math.max(8, nameMaxW));
+			// Pencil — rename, left of the progress tally so neither overlaps.
+			int penX = progX - 12;
+			boolean penHover = mouseX >= penX - 2 && mouseX <= penX + 8 && mouseY >= y + 2 && mouseY <= y + 14 && !modalOpen();
+			g.text(font, "\u270E", penX, y + 4, penHover ? TEXT_GOLD : TEXT_DIM, false);
+
+			// Quest Name — clamped to stop before the pencil.
+			int nameMaxW = Math.max(8, penX - 4 - (cardX + 6));
+			String name = font.plainSubstrByWidth(quest.name(), nameMaxW);
 			g.text(font, name, cardX + 6, y + 4, isSelected ? TEXT_GOLD : TEXT_WHITE, false);
 
 			// Delete [✕] button
@@ -597,7 +631,7 @@ public final class AdminQuestScreen extends Screen {
 			g.text(font, "\u2715", delX, y + 4, delHover ? TEXT_RED : TEXT_DIM, false);
 
 			// Tooltip on quest hover
-			if (hover && mouseX < delX - 4) {
+			if (hover && mouseX < progX - 16) {
 				Component tip = Component.literal(quest.name() + " (" + progStr + " done) · Click to select");
 				g.setTooltipForNextFrame(font, tip, mouseX, mouseY);
 			}
@@ -623,8 +657,9 @@ public final class AdminQuestScreen extends Screen {
 		int statusColor = task.complete() ? TEXT_GREEN : TEXT_DIM;
 		g.text(font, statusIcon, x + 3, y + 3, statusColor, false);
 
-		// Label & Count
-		String label = font.plainSubstrByWidth(task.label() + " x" + task.need(), w - 66);
+		// Label & Count — the name is clamped on its own so a long name never eats the count.
+		String countSuffix = " x" + task.need();
+		String label = font.plainSubstrByWidth(task.label(), Math.max(8, w - 66 - font.width(countSuffix))) + countSuffix;
 		g.text(font, label, x + 12, y + 3, isTaskEditing ? TEXT_GOLD : (task.complete() ? TEXT_MUTED : TEXT_WHITE), false);
 
 		// Assignee Chip — same UUID-stub handling as the picker pill.
@@ -786,34 +821,25 @@ public final class AdminQuestScreen extends Screen {
 		int w = rightPaneWidth - 8;
 		int x = rightPaneLeft + 4;
 
-		// Header: title, progress, reward, prerequisites, locked banner, rule.
-		// Pitches are named constants so rightHeaderHeight() cannot drift from them.
-		int headerH = rightHeaderHeight(quest);
-		int hy = listTop - (int) rightScroll;
-		int y = hy + headerH;
+		// Header is pinned: title and rule never scroll, so rows sliding up are
+		// clipped at the content edge instead of drawing over them.
+		int headerH = rightHeaderHeight();
+		g.text(font, font.plainSubstrByWidth(quest.name(), w), x, listTop + HDR_TITLE_Y, TEXT_GOLD, false);
 
-		long done = quest.tasks().stream().filter(AdminSyncPayload.AdminTaskEntry::complete).count();
-		g.text(font, font.plainSubstrByWidth(quest.name(), w), x, hy + HDR_TITLE_Y, TEXT_GOLD, false);
-
-		String prog = done + "/" + quest.tasks().size() + " tasks complete";
-		g.text(font, prog, x, hy + HDR_PROGRESS_Y, done == quest.tasks().size() && !quest.tasks().isEmpty() ? TEXT_GREEN : TEXT_MUTED, false);
-
-		int ruleY = hy + HDR_PROGRESS_Y + HDR_RULE_GAP;
+		int ruleY = listTop + HDR_TITLE_Y + HDR_RULE_GAP;
 		g.fill(x, ruleY, x + w, ruleY + HDR_RULE_H, PANEL_BORDER);
 
-		// Tasks — clipped vertically so a row near the bottom edge cannot bleed past
-		// the pane, but horizontally it must reach the same right edge the rows use.
-		//
-		// The clip used to stop 8px short of x + w, which silently swallowed each row's
-		// delete button: the glyph starts exactly at x + w - 8, so it had zero visible
-		// width and looked like it had never been drawn.
-		g.enableScissor(rightPaneLeft, listTop, x + w, listBottom - 14);
+		// Tasks live below the header and are clipped to the content box, so the
+		// scissor top is the content edge, not the pane top.
+		int contentTop = listTop + headerH;
+		int y = contentTop - (int) rightScroll;
+		g.enableScissor(rightPaneLeft, contentTop, x + w, listBottom);
 		if (quest.tasks().isEmpty()) {
 			g.text(font, "No tasks yet.", x, y + 2, TEXT_DIM, false);
 			y += 14;
 		} else {
 			for (AdminSyncPayload.AdminTaskEntry task : quest.tasks()) {
-				if (y + TASK_ROW_H > listTop && y < listBottom) {
+				if (y + TASK_ROW_H > contentTop && y < listBottom) {
 					y = renderTaskRow(g, quest, task, x, y, w, mouseX, mouseY);
 				} else {
 					y += taskRowPitch();
@@ -822,16 +848,8 @@ public final class AdminQuestScreen extends Screen {
 		}
 		g.disableScissor();
 
-		// [+ Add Task] button pinned to the bottom of the pane
-		int btnW = font.width("+ Add Task") + 10;
-		int btnX = x + w - btnW;
-		int btnY = listBottom - 14;
-		boolean btnHover = mouseX >= btnX && mouseX <= btnX + btnW && mouseY >= btnY && mouseY <= btnY + 14 && !modalOpen();
-		g.fill(btnX, btnY, btnX + btnW, btnY + 14, btnHover ? BTN_PRIMARY_HOVER : BTN_PRIMARY);
-		g.text(font, "+ Add Task", btnX + 5, btnY + 3, TEXT_WHITE, false);
-
-		rightContentHeight = (y + (int) rightScroll) - listTop;
-		renderScrollbar(g, x + w + 1, listTop, listBottom - listTop, rightContentHeight, rightScroll);
+		rightContentHeight = (y + (int) rightScroll) - contentTop;
+		renderScrollbar(g, x + w + 1, contentTop, listBottom - contentTop, rightContentHeight, rightScroll);
 	}
 
 	/**
@@ -854,23 +872,19 @@ public final class AdminQuestScreen extends Screen {
 
 	/**
 	 * Right-pane header rows. Line pitch equals the font's 9px height plus 2px of
-	 * leading; the rule sits below the last line with a gap so descenders clear it.
 	 */
 	private static final int HDR_TITLE_Y = 1;
-	private static final int HDR_PROGRESS_Y = 12;
 	/** Glyph height of the 9px font, used to keep rules clear of descenders. */
 	private static final int FONT_H = 9;
 	/** Gap between the last header line's baseline and the divider rule. */
 	private static final int HDR_RULE_GAP = FONT_H + 3;
-	/** Rule thickness. */
 	private static final int HDR_RULE_H = 1;
 	/** Gap between the rule and the first task row. */
 	private static final int HDR_RULE_TO_TASKS = 6;
 
-	/** Height of the right-pane header block; shared by render and click hit-testing. */
-	private int rightHeaderHeight(AdminSyncPayload.AdminQuestEntry quest) {
-		int ruleBottom = HDR_PROGRESS_Y + HDR_RULE_GAP + HDR_RULE_H;
-		return ruleBottom + HDR_RULE_TO_TASKS;
+	/** Height of the right-pane header block (title, rule, gap); shared by render and click hit-testing. */
+	private int rightHeaderHeight() {
+		return HDR_TITLE_Y + HDR_RULE_GAP + HDR_RULE_H + HDR_RULE_TO_TASKS;
 	}
 
 	private AdminSyncPayload.AdminQuestEntry selectedQuest() {
@@ -1196,7 +1210,7 @@ public final class AdminQuestScreen extends Screen {
 		g.fill(modalX, modalY + 20, modalX + modalW, modalY + 21, CARD_SELECTED_BORDER);
 
 		// Header
-		g.text(font, "Create New Quest", modalX + 8, modalY + 6, TEXT_GOLD, false);
+		g.text(font, renameMode ? "Rename Quest" : "Create New Quest", modalX + 8, modalY + 6, TEXT_GOLD, false);
 
 		// [✕] Close
 		int closeX = modalX + modalW - 14;
@@ -1207,13 +1221,14 @@ public final class AdminQuestScreen extends Screen {
 		// Buttons Row
 		int btnY = modalY + 58;
 
-		// [Create Quest]
-		int createBtnW = font.width("Create Quest") + 8;
+		// [Create Quest] / [Rename]
+		String createLabel = renameMode ? "Rename" : "Create Quest";
+		int createBtnW = font.width(createLabel) + 8;
 		int createBtnX = modalX + modalW - createBtnW - 12;
 		boolean canCreate = newQuestNameField != null && !newQuestNameField.getValue().trim().isEmpty();
 		boolean createHover = mouseX >= createBtnX && mouseX <= createBtnX + createBtnW && mouseY >= btnY && mouseY <= btnY + 16;
 		g.fill(createBtnX, btnY, createBtnX + createBtnW, btnY + 16, canCreate ? (createHover ? BTN_PRIMARY_HOVER : BTN_PRIMARY) : 0xFF3E3E42);
-		g.text(font, "Create Quest", createBtnX + 4, btnY + 4, canCreate ? TEXT_WHITE : TEXT_DIM, false);
+		g.text(font, createLabel, createBtnX + 4, btnY + 4, canCreate ? TEXT_WHITE : TEXT_DIM, false);
 
 		// [Cancel]
 		int cancelBtnW = font.width("Cancel") + 8;
@@ -1335,13 +1350,13 @@ public final class AdminQuestScreen extends Screen {
 			return true;
 		}
 
-		// [+ New Quest]
-		int newBtnW = font.width("+ New Quest") + 8;
+		// [+ Add Task] — header spot; needs a selected quest to add to.
+		int newBtnW = font.width("+ Add Task") + 8;
 		int newBtnH = 14;
 		int newBtnX = panelLeft + panelWidth - newBtnW - 22;
 		int newBtnY = panelTop + 4;
-		if (mx >= newBtnX && mx <= newBtnX + newBtnW && my >= newBtnY && my <= newBtnY + newBtnH) {
-			openNewQuestDialog();
+		if (selectedQuest() != null && mx >= newBtnX && mx <= newBtnX + newBtnW && my >= newBtnY && my <= newBtnY + newBtnH) {
+			openItemPicker();
 			return true;
 		}
 
@@ -1363,9 +1378,22 @@ public final class AdminQuestScreen extends Screen {
 	}
 
 	private void openNewQuestDialog() {
+		renameMode = false;
 		newQuestDialogOpen = true;
 		if (newQuestNameField != null) {
 			newQuestNameField.setValue("");
+			newQuestNameField.visible = true;
+			newQuestNameField.setFocused(true);
+			setFocused(newQuestNameField);
+		}
+	}
+
+	/** Same dialog, committed as a rename instead of a create. */
+	private void openRenameDialog(AdminSyncPayload.AdminQuestEntry quest) {
+		renameMode = true;
+		newQuestDialogOpen = true;
+		if (newQuestNameField != null) {
+			newQuestNameField.setValue(quest.name());
 			newQuestNameField.visible = true;
 			newQuestNameField.setFocused(true);
 			setFocused(newQuestNameField);
@@ -1394,8 +1422,9 @@ public final class AdminQuestScreen extends Screen {
 
 		int btnY = modalY + 58;
 
-		// [Create Quest]
-		int createBtnW = font.width("Create Quest") + 8;
+		// [Create Quest] / [Rename] — label must match the render path's width.
+		String createLabel = renameMode ? "Rename" : "Create Quest";
+		int createBtnW = font.width(createLabel) + 8;
 		int createBtnX = modalX + modalW - createBtnW - 12;
 		if (mx >= createBtnX && mx <= createBtnX + createBtnW && my >= btnY && my <= btnY + 16) {
 			commitCreateQuest();
@@ -1416,14 +1445,113 @@ public final class AdminQuestScreen extends Screen {
 
 	private void commitCreateQuest() {
 		if (newQuestNameField == null) return;
-		String name = newQuestNameField.getValue().trim();
-		if (name.isEmpty()) return;
+		String raw = newQuestNameField.getValue().trim();
+		if (raw.isEmpty()) return;
+
+		if (renameMode) {
+			if (selectedQuestId != null && ClientPlayNetworking.canSend(AdminActionPayload.TYPE)) {
+				ClientPlayNetworking.send(AdminActionPayload.renameQuest(selectedQuestId, raw));
+			}
+			closeNewQuestDialog();
+			return;
+		}
+
+		// Text starting with { or [ is a bulk import, not a name.
+		if (raw.startsWith("{") || raw.startsWith("[")) {
+			if (!importQuestsJson(raw)) {
+				return; // keep the dialog open on bad JSON
+			}
+			closeNewQuestDialog();
+			return;
+		}
 
 		if (ClientPlayNetworking.canSend(AdminActionPayload.TYPE)) {
-			ClientPlayNetworking.send(AdminActionPayload.createQuest(name, List.of()));
+			ClientPlayNetworking.send(AdminActionPayload.createQuest(raw, List.of()));
 		}
 
 		closeNewQuestDialog();
+	}
+
+	/**
+	 * Creates quests from JSON. Accepted shape: an object or array of objects, each
+	 * with a required "name" and optional "tasks" —
+	 * {@code [{"name":"Wood","tasks":[{"item":"oak_log","count":64,"player":"Alex"}]}]}.
+	 * A bare item id gets the minecraft: namespace; unknown players leave the task
+	 * unassigned. Returns whether anything was sent.
+	 */
+	private boolean importQuestsJson(String json) {
+		JsonElement parsed;
+		try {
+			parsed = JsonParser.parseString(json);
+		} catch (Exception e) {
+			QuestBook.LOGGER.warn("Quest import: not valid JSON");
+			return false;
+		}
+
+		List<JsonElement> questEls = new ArrayList<>();
+		if (parsed.isJsonArray()) {
+			parsed.getAsJsonArray().forEach(questEls::add);
+		} else if (parsed.isJsonObject()) {
+			questEls.add(parsed);
+		} else {
+			return false;
+		}
+
+		boolean sent = false;
+		for (JsonElement qe : questEls) {
+			if (!qe.isJsonObject()) continue;
+			JsonObject q = qe.getAsJsonObject();
+			String name = q.has("name") && q.get("name").isJsonPrimitive() ? q.get("name").getAsString().trim() : "";
+			if (name.isEmpty()) continue;
+
+			List<AdminActionPayload.NewTaskData> tasks = new ArrayList<>();
+			if (q.has("tasks") && q.get("tasks").isJsonArray()) {
+				for (JsonElement te : q.get("tasks").getAsJsonArray()) {
+					if (!te.isJsonObject()) continue;
+					JsonObject t = te.getAsJsonObject();
+					String item = t.has("item") && t.get("item").isJsonPrimitive() ? t.get("item").getAsString().trim() : "";
+					if (item.isEmpty() || !item.contains(":")) item = "minecraft:" + item;
+					if (Identifier.tryParse(item) == null) continue;
+					int count = t.has("count") && t.get("count").isJsonPrimitive() ? Math.max(1, t.get("count").getAsInt()) : 1;
+					tasks.add(new AdminActionPayload.NewTaskData(item, count, resolvePlayer(t)));
+				}
+			}
+
+			// A name that matches an existing quest appends to it; otherwise create.
+			UUID existing = null;
+			for (AdminSyncPayload.AdminQuestEntry quest : ClientAdminState.quests()) {
+				if (quest.name().equalsIgnoreCase(name)) {
+					existing = quest.id();
+					break;
+				}
+			}
+
+			if (ClientPlayNetworking.canSend(AdminActionPayload.TYPE)) {
+				if (existing != null) {
+					for (AdminActionPayload.NewTaskData task : tasks) {
+						ClientPlayNetworking.send(AdminActionPayload.addTask(existing, task));
+					}
+				} else {
+					ClientPlayNetworking.send(AdminActionPayload.createQuest(name, tasks));
+				}
+				sent = true;
+			}
+		}
+		return sent;
+	}
+
+	/** Player named in a task's "player" key, or unassigned when not online. */
+	private UUID resolvePlayer(JsonObject t) {
+		if (!t.has("player") || !t.get("player").isJsonPrimitive()) {
+			return Task.UNASSIGNED;
+		}
+		String wanted = t.get("player").getAsString();
+		for (AdminSyncPayload.PlayerEntry p : ClientAdminState.players()) {
+			if (p.name().equalsIgnoreCase(wanted)) {
+				return p.id();
+			}
+		}
+		return Task.UNASSIGNED;
 	}
 
 	// --- DEBUG HOOKS (development only; used by EditorDebugDriver) ----------
@@ -1554,6 +1682,12 @@ public final class AdminQuestScreen extends Screen {
 			int top = pickerTop();
 			bx = Mth.clamp(assigneeDropdownX, left + 4, left + pickerWidth() - boxW - 4);
 			by = Mth.clamp(assigneeDropdownY - boxH - 2, top + 4, top + pickerHeight() - boxH - 4);
+		} else if (editingTaskId != null) {
+			// The edit modal centres on the screen, not the panel: clamping to the
+			// panel put the hit box where the dropdown is not. Mirrors the render path.
+			bx = Mth.clamp(assigneeDropdownX, editModalX() + 4, editModalX() + EDIT_MODAL_W - boxW - 4);
+			by = Mth.clamp(assigneeDropdownY - boxH - 2, editModalY() + 4,
+					editModalY() + EDIT_MODAL_H - boxH - 4);
 		} else {
 			bx = Mth.clamp(assigneeDropdownX, panelLeft + 4, panelLeft + panelWidth - boxW - 4);
 			by = Mth.clamp(assigneeDropdownY - boxH - 2, panelTop + 4, panelTop + panelHeight - boxH - 4);
@@ -1581,12 +1715,28 @@ public final class AdminQuestScreen extends Screen {
 		int listTop = leftPaneTop;
 		int y = listTop - (int) leftScroll;
 
+		// [+ New Quest] at the pane bottom, before the cards.
+		int addBtnY = leftAddButtonY();
+		if (mx >= leftPaneLeft && mx <= leftPaneLeft + leftAddButtonW() && my >= addBtnY && my <= addBtnY + LEFT_ADD_H) {
+			openNewQuestDialog();
+			return true;
+		}
+
 		for (AdminSyncPayload.AdminQuestEntry quest : ClientAdminState.quests()) {
 			int cardH = QUEST_CARD_H;
 			int cardW = leftPaneWidth - 6;
 			int cardX = leftPaneLeft;
 
 			if (my >= y && my < y + cardH) {
+				// Pencil — rename, left of the progress tally.
+				int progStrW = font.width(quest.tasks().size() + "/" + quest.tasks().size());
+				int progX2 = cardX + cardW - 10 - 4 - progStrW;
+				int penX = progX2 - 12;
+				if (mx >= penX - 2 && mx <= penX + 8 && my >= y + 2 && my <= y + 14) {
+					openRenameDialog(quest);
+					return true;
+				}
+
 				// Delete [✕] Quest
 				int delX = cardX + cardW - 10;
 				if (mx >= delX - 2 && mx <= delX + 8) {
@@ -1658,14 +1808,17 @@ public final class AdminQuestScreen extends Screen {
 		int listBottom = rightPaneTop + rightPaneHeight;
 		int w = rightPaneWidth - 8;
 		int x = rightPaneLeft + 4;
-		int y = listTop - (int) rightScroll;
 
-		// Skip the header block (title, progress, reward, prereqs, locked, rule)
-		y += rightHeaderHeight(quest);
+		// Pinned header: clicks above the content edge belong to nothing.
+		int contentTop = listTop + rightHeaderHeight();
+		if (my < contentTop) {
+			return false;
+		}
+		int y = contentTop - (int) rightScroll;
 
 		// Task rows
 		for (AdminSyncPayload.AdminTaskEntry task : quest.tasks()) {
-			if (my >= y && my < y + TASK_ROW_H) {
+			if (y + TASK_ROW_H > contentTop && y < listBottom && my >= y && my < y + TASK_ROW_H) {
 				// Delete [✕]
 				int delX = x + w - 8;
 				if (mx >= delX - 2 && mx <= delX + 8) {
@@ -1683,15 +1836,6 @@ public final class AdminQuestScreen extends Screen {
 				return true;
 			}
 			y += taskRowPitch();
-		}
-
-		// [+ Add Task]
-		int btnW = font.width("+ Add Task") + 10;
-		int btnX = x + w - btnW;
-		int btnY = listBottom - 14;
-		if (mx >= btnX && mx <= btnX + btnW && my >= btnY && my <= btnY + 14) {
-			openItemPicker();
-			return true;
 		}
 
 		return false;
@@ -1853,14 +1997,14 @@ public final class AdminQuestScreen extends Screen {
 		}
 
 		if (mouseX >= leftPaneLeft && mouseX <= leftPaneLeft + leftPaneWidth) {
-			int visible = leftPaneHeight;
+			int visible = leftListBottom() - leftPaneTop;
 			int maxScroll = Math.max(0, leftContentHeight - visible);
 			leftScroll = Mth.clamp(leftScroll - scrollY * 16, 0, maxScroll);
 			return true;
 		}
 
 		if (mouseX >= rightPaneLeft && mouseX <= rightPaneLeft + rightPaneWidth) {
-			int visible = rightPaneHeight;
+			int visible = rightPaneHeight - rightHeaderHeight();
 			int maxScroll = Math.max(0, rightContentHeight - visible);
 			rightScroll = Mth.clamp(rightScroll - scrollY * 16, 0, maxScroll);
 			return true;
