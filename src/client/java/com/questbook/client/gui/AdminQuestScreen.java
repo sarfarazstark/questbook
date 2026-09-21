@@ -557,12 +557,12 @@ public final class AdminQuestScreen extends Screen {
 	g.text(font, "+ Add Task", newBtnX + 4, newBtnY + 3, canAdd ? TEXT_WHITE : TEXT_DIM, false);
 
 		// [AI Prompt] — copies the import-converter prompt. Feedback lives on the timer.
-		int aiW = font.width(aiCopiedTicks > 0 ? "Copied!" : "AI Prompt") + 8;
+		int aiW = font.width(aiCopiedTicks > 0 ? "Copied!" : "Prompt") + 8;
 		int aiX = newBtnX - aiW - 6;
 		int aiY = panelTop + 4;
 		boolean aiHover = !modalOpen() && mouseX >= aiX && mouseX <= aiX + aiW && mouseY >= aiY && mouseY <= aiY + newBtnH;
 		g.fill(aiX, aiY, aiX + aiW, aiY + newBtnH, aiHover ? BTN_SECONDARY_HOVER : BTN_SECONDARY);
-		g.text(font, aiCopiedTicks > 0 ? "Copied!" : "AI Prompt", aiX + 4, aiY + 3, aiCopiedTicks > 0 ? TEXT_GREEN : TEXT_WHITE, false);
+		g.text(font, aiCopiedTicks > 0 ? "Copied!" : "Prompt", aiX + 4, aiY + 3, aiCopiedTicks > 0 ? TEXT_GREEN : TEXT_WHITE, false);
 
 		// [✕] Close Button
 		int closeX = panelLeft + panelWidth - 14;
@@ -1393,7 +1393,7 @@ public final class AdminQuestScreen extends Screen {
 		}
 
 		// [AI Prompt] — same geometry as the render path.
-		int aiW = font.width(aiCopiedTicks > 0 ? "Copied!" : "AI Prompt") + 8;
+		int aiW = font.width(aiCopiedTicks > 0 ? "Copied!" : "Prompt") + 8;
 		int aiX = newBtnX - aiW - 6;
 		if (!modalOpen() && mx >= aiX && mx <= aiX + aiW && my >= newBtnY && my <= newBtnY + newBtnH) {
 			minecraft.keyboardHandler.setClipboard(IMPORT_PROMPT);
