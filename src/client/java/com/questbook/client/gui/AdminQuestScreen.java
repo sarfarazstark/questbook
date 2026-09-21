@@ -390,24 +390,22 @@ public final class AdminQuestScreen extends Screen {
 
 		@Override
 		public void extractWidgetRenderState(GuiGraphicsExtractor g, int mouseX, int mouseY, float partialTick) {
-			// EditBox only centres vertically while bordered (textY = getY() +
-			// (height - 8) / 2); unbordered it pins the text to the top edge. 8 is that
-			// same glyph band, which also lines the value up with the label drawn at
-			// fieldY + 3. The widget is nudged for the text pass and restored straight
-			// after — box, border and hit-test all stay on the pinned rect.
+			// x carries the inset because EditBox derives textX from getX() in
+			// updateTextPosition (getX() + (centered ? … : bordered ? 4 : 0)), and an
+			// unbordered field lands on the 0 branch. Padding getX() rather than the
+			// drawn x means value, cursor, selection highlight and our hint all share
+			// one origin — nudging only the hint left the value flush to the border.
 			int shiftY = Math.max(0, (getHeight() - 8) / 2);
-			setX(pinnedX);
+			setX(pinnedX + (centered ? 0 : TEXT_PAD));
 			setY(pinnedY + shiftY);
 			super.extractWidgetRenderState(g, mouseX, mouseY, partialTick);
 			setX(pinnedX);
 			setY(pinnedY);
-			// Left inset belongs to us: an unbordered EditBox starts text at getX().
-			// On the pinned rect (not the nudged one) — only the text pass moves.
-			setX(pinnedX + TEXT_PAD);
 			if (hint != null && getValue().isEmpty()) {
+				// getX() is back on the pinned rect here, so re-apply the inset rather
+				// than reading it off the widget.
 				drawHint(g, pinnedY + shiftY);
 			}
-			setX(pinnedX);
 			int x = pinnedX;
 			int y = pinnedY;
 			int r = x + getWidth();
@@ -420,13 +418,18 @@ public final class AdminQuestScreen extends Screen {
 		}
 
 		/**
-		 * Inset from the field's own {@code getX()}, which is why the caller nudges x
-		 * first. Centred fields mirror EditBox's own placement; {@code false} on the
-		 * shadow flag is the whole point — see the class note.
+		 * Same origin the value uses: {@code pinnedX + TEXT_PAD}, or EditBox's own
+		 * centring. Text is confined to the frame's inner rect so a hint wider than
+		 * the field is cut off at the border instead of running over it.
+		 * {@code false} on the shadow flag is the whole point — see the class note.
 		 */
 		private void drawHint(GuiGraphicsExtractor g, int textY) {
-			int hx = centered ? getX() + (getWidth() - textFont.width(hint)) / 2 : getX();
+			int left = pinnedX + 1;
+			int right = pinnedX + getWidth() - 1;
+			int hx = centered ? left + (right - left - textFont.width(hint)) / 2 : pinnedX + TEXT_PAD;
+			g.enableScissor(left, pinnedY + 1, right, pinnedY + getHeight() - 1);
 			g.text(textFont, hint, hx, textY, TEXT_DIM, false);
+			g.disableScissor();
 		}
 	}
 
@@ -1260,6 +1263,22 @@ public final class AdminQuestScreen extends Screen {
 	public void debugOpenPicker() {
 		newQuestDialogOpen = false;
 		openItemPicker();
+	}
+
+	/**
+	 * Puts text in the picker's search field so a capture can photograph the value
+	 * path. The placeholder is only half the story: the value is drawn by EditBox
+	 * itself, from a different origin, so it needs its own shot.
+	 */
+	public void debugTypeSearch(String text) {
+		if (itemSearchField != null) {
+			itemSearchField.setValue(text);
+		}
+	}
+
+	/** Value drawn in the search field, so a capture can assert it is where it looks. */
+	public String debugSearchValue() {
+		return itemSearchField == null ? "<null>" : itemSearchField.getValue();
 	}
 
 	/** Opens the new-quest dialog. */
